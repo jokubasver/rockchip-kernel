@@ -383,4 +383,13 @@ config JOYSTICK_FSIA6B
 	  To compile this driver as a module, choose M here: the
 	  module will be called fsia6b.
 
+config JOYSTICK_ODROIDGO3
+	tristate "ODROID-GO3 and R36S clone joypad"
+	depends on OF && GPIOLIB && IIO && PWM
+	select INPUT_POLLDEV
+	select INPUT_FF_MEMLESS
+	help
+	  GPIO buttons, multiplexed SARADC sticks and rumble used by
+	  the R36S Type1 clone. Preserves the ArkOS4Clone input ABI.
+
 endif
