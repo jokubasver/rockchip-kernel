@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config RTW88_R36S
+	tristate "Realtek RTL8821CU USB Wi-Fi for R36S clone"
+	depends on USB && MAC80211 && CFG80211 && !RTW88
+	select FW_LOADER
+	help
+	  Build the four-module rtw88 RTL8821CU USB backport used by the
+	  R36S clone. Requires rtw8821c_fw.bin in /lib/firmware/rtw88.
