@@ -987,33 +987,52 @@ static int rk817_resume_path_put(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-static int rk817_dac_vol_put(struct snd_kcontrol *kcontrol,
-			     struct snd_ctl_elem_value *ucontrol)
+/*
+ * Keep the 0..255 ALSA volume scale used by clone userspace while avoiding
+ * DAC register values 0..2, which the RK817 cannot use.
+ */
+static int rk817_dac_vol_get(struct snd_kcontrol *kcontrol,
+			    struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
-	unsigned int left_val, right_val;
-	unsigned int max_val = RK817_DAC_VOL_MAX;
+	int i, ret;
 
-	left_val = max_val - ucontrol->value.integer.value[0];
-	right_val = max_val - ucontrol->value.integer.value[1];
+	ret = snd_soc_get_volsw(kcontrol, ucontrol);
+	if (ret)
+		return ret;
 
-	if (left_val < RK817_DAC_VOL_MIN || left_val > RK817_DAC_VOL_MAX ||
-	    right_val < RK817_DAC_VOL_MIN || right_val > RK817_DAC_VOL_MAX) {
+	for (i = 0; i < 2; i++) {
+		long value = ucontrol->value.integer.value[i];
 
-		dev_warn(component->dev,
-			 "%s: Volume out of range [%d, %d], left=%ld, right=%ld\n",
-			 __func__,
-			 max_val - RK817_DAC_VOL_MAX,
-			 max_val - RK817_DAC_VOL_MIN,
-			 ucontrol->value.integer.value[0],
-			 ucontrol->value.integer.value[1]);
-
-		return -EINVAL;
+		value = min_t(long, value,
+			      RK817_DAC_VOL_MAX - RK817_DAC_VOL_MIN);
+		ucontrol->value.integer.value[i] =
+			DIV_ROUND_CLOSEST(value * RK817_DAC_VOL_MAX,
+					  RK817_DAC_VOL_MAX - RK817_DAC_VOL_MIN);
 	}
 
-	/* Re-invert the values before setting them */
-	ucontrol->value.integer.value[0] = max_val - left_val;
-	ucontrol->value.integer.value[1] = max_val - right_val;
+	return 0;
+}
+
+static int rk817_dac_vol_put(struct snd_kcontrol *kcontrol,
+			    struct snd_ctl_elem_value *ucontrol)
+{
+	int i;
+
+	for (i = 0; i < 2; i++) {
+		long value = ucontrol->value.integer.value[i];
+
+		if (value < 0 || value > RK817_DAC_VOL_MAX)
+			return -EINVAL;
+	}
+
+	for (i = 0; i < 2; i++) {
+		long value = ucontrol->value.integer.value[i];
+
+		ucontrol->value.integer.value[i] =
+			DIV_ROUND_CLOSEST(value *
+					  (RK817_DAC_VOL_MAX - RK817_DAC_VOL_MIN),
+					  RK817_DAC_VOL_MAX);
+	}
 
 	return snd_soc_put_volsw(kcontrol, ucontrol);
 }
@@ -1029,8 +1048,8 @@ static struct snd_kcontrol_new rk817_snd_controls[] = {
 		     rk817_resume_path_get, rk817_resume_path_put),
 
 	SOC_DOUBLE_R_EXT_TLV("Playback Volume", RK817_CODEC_DDAC_VOLL,
-			     RK817_CODEC_DDAC_VOLR, 0, 0xff, 1,
-			     snd_soc_get_volsw, rk817_dac_vol_put,
+			     RK817_CODEC_DDAC_VOLR, 0, RK817_DAC_VOL_MAX, 1,
+			     rk817_dac_vol_get, rk817_dac_vol_put,
 			     dac_vol_tlv),
 
 	SOC_DOUBLE_R_TLV("ADC Capture Volume", RK817_CODEC_DADC_VOLL,
