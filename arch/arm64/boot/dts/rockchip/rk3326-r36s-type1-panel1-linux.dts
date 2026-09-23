@@ -434,9 +434,71 @@
 };
 
 &dmc {
-	/* Keep the existing bootloader DDR rate until its SiP ABI is tested. */
 	center-supply = <&vdd_logic>;
-	status = "disabled";
+	status = "okay";
+};
+
+/*
+ * DDR and GPU share vdd_logic, which retains a 1.175 V floor. Keep the OPP
+ * maximum above that floor or Rockchip's selector prunes every higher rate.
+ */
+&dmc_opp_table {
+	rockchip,max-volt = <1250000>;
+
+	opp-194000000 {
+		opp-microvolt = <1175000>;
+		opp-microvolt-L0 = <1175000>;
+		opp-microvolt-L1 = <1175000>;
+		opp-microvolt-L2 = <1175000>;
+		opp-microvolt-L3 = <1175000>;
+	};
+	opp-328000000 {
+		opp-microvolt = <1175000>;
+		opp-microvolt-L0 = <1175000>;
+		opp-microvolt-L1 = <1175000>;
+		opp-microvolt-L2 = <1175000>;
+		opp-microvolt-L3 = <1175000>;
+	};
+	opp-450000000 {
+		opp-microvolt = <1175000>;
+		opp-microvolt-L0 = <1175000>;
+		opp-microvolt-L1 = <1175000>;
+		opp-microvolt-L2 = <1175000>;
+		opp-microvolt-L3 = <1175000>;
+	};
+	opp-666000000 {
+		opp-microvolt = <1175000>;
+		opp-microvolt-L0 = <1175000>;
+		opp-microvolt-L1 = <1175000>;
+		opp-microvolt-L2 = <1175000>;
+		opp-microvolt-L3 = <1175000>;
+	};
+	opp-786000000 {
+		opp-microvolt = <1175000>;
+		opp-microvolt-L0 = <1175000>;
+		opp-microvolt-L1 = <1175000>;
+		opp-microvolt-L2 = <1175000>;
+		opp-microvolt-L3 = <1175000>;
+		status = "okay";
+	};
+	opp-924000000 {
+		opp-hz = /bits/ 64 <924000000>;
+		opp-microvolt = <1175000>;
+		opp-microvolt-L0 = <1175000>;
+		opp-microvolt-L1 = <1175000>;
+		opp-microvolt-L2 = <1175000>;
+		opp-microvolt-L3 = <1175000>;
+	};
+	/* Trusted firmware realizes the 4.4 tree's 1040 MHz request as 1032 MHz. */
+	opp-1032000000 {
+		opp-hz = /bits/ 64 <1032000000>;
+		opp-microvolt = <1200000>;
+		opp-microvolt-L0 = <1200000>;
+		opp-microvolt-L1 = <1200000>;
+		opp-microvolt-L2 = <1200000>;
+		opp-microvolt-L3 = <1200000>;
+	};
+
 };
 
 
@@ -446,7 +508,7 @@
 };
 
 /*
- * DDR is still held at its boot rate, so vdd_logic has a 1.175 V floor.
+ * GPU and DMC share vdd_logic, which retains a 1.175 V floor.
  * Match every GPU OPP to that floor; otherwise the regulator rejects the
  * entire table and Mali remains fixed at 200 MHz without devfreq.
  * With the current PLL parents the clock can reach 600 MHz, but 560 MHz
