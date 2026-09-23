@@ -445,6 +445,62 @@
 	status = "okay";
 };
 
+/*
+ * DDR is still held at its boot rate, so vdd_logic has a 1.175 V floor.
+ * Match every GPU OPP to that floor; otherwise the regulator rejects the
+ * entire table and Mali remains fixed at 200 MHz without devfreq.
+ * With the current PLL parents the clock can reach 600 MHz, but 560 MHz
+ * rounds to 520 MHz and 640 MHz rounds to 600 MHz. Keep only real steps.
+ * Leave voltage headroom above the OPP floor: Rockchip's OPP selector
+ * otherwise treats 200 MHz as the highest safe rate and prunes the rest.
+ */
+&gpu_opp_table {
+	rockchip,max-volt = <1250000>;
+
+	opp-200000000 {
+		opp-microvolt = <1175000>;
+		opp-microvolt-L0 = <1175000>;
+		opp-microvolt-L1 = <1175000>;
+		opp-microvolt-L2 = <1175000>;
+		opp-microvolt-L3 = <1175000>;
+	};
+	opp-300000000 {
+		opp-microvolt = <1175000>;
+		opp-microvolt-L0 = <1175000>;
+		opp-microvolt-L1 = <1175000>;
+		opp-microvolt-L2 = <1175000>;
+		opp-microvolt-L3 = <1175000>;
+	};
+	opp-400000000 {
+		opp-microvolt = <1175000>;
+		opp-microvolt-L0 = <1175000>;
+		opp-microvolt-L1 = <1175000>;
+		opp-microvolt-L2 = <1175000>;
+		opp-microvolt-L3 = <1175000>;
+	};
+	opp-480000000 {
+		opp-microvolt = <1175000>;
+		opp-microvolt-L0 = <1175000>;
+		opp-microvolt-L1 = <1175000>;
+		opp-microvolt-L2 = <1175000>;
+		opp-microvolt-L3 = <1175000>;
+	};
+	opp-520000000 {
+		opp-microvolt = <1175000>;
+		opp-microvolt-L0 = <1175000>;
+		opp-microvolt-L1 = <1175000>;
+		opp-microvolt-L2 = <1175000>;
+		opp-microvolt-L3 = <1175000>;
+	};
+	opp-600000000 {
+		opp-hz = /bits/ 64 <600000000>;
+		opp-microvolt = <1175000>;
+		opp-microvolt-L0 = <1175000>;
+		opp-microvolt-L1 = <1175000>;
+		opp-microvolt-L2 = <1175000>;
+		opp-microvolt-L3 = <1175000>;
+	};
+};
 
 &i2c0 {
 	status = "okay";
