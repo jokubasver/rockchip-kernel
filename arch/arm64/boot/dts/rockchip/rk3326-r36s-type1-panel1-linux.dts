@@ -34,6 +34,7 @@
 		compatible = "adc-keys";
 		keyup-threshold-microvolt = <1800000>;
 		io-channels = <&saradc 2>;
+		io-channel-names = "buttons";
 		poll-interval = <50>;
 		autorepeat;
 
