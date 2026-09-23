@@ -256,14 +256,9 @@
 		simple-audio-card,format = "i2s";
 		simple-audio-card,name = "rockchip,rk817-codec";
 		simple-audio-card,mclk-fs = <256>;
-		simple-audio-card,widgets =
-		"Microphone", "Mic Jack",
-		"Headphone", "Headphone Jack";
-		simple-audio-card,routing =
-		"MIC_IN", "Mic Jack",
-		/*"IN1P", "Mic Jack",*/
-		"Headphone Jack", "HPOL",
-		"Headphone Jack", "HPOR";
+		/* The 5.10 RK817 codec has mixer paths, not DAPM MIC_IN/HPOL/HPOR pins. */
+		/* "Headphones" is the pin name used by simple-card's HP detect jack. */
+		simple-audio-card,widgets = "Headphone", "Headphones";
 		simple-audio-card,hp-det-gpio = <&gpio2 RK_PC6 GPIO_ACTIVE_LOW>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&hp_det>;
