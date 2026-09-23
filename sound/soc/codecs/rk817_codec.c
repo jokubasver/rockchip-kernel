@@ -1028,7 +1028,7 @@ static struct snd_kcontrol_new rk817_snd_controls[] = {
 	SOC_ENUM_EXT("Resume Path", rk817_resume_path_type,
 		     rk817_resume_path_get, rk817_resume_path_put),
 
-	SOC_DOUBLE_R_EXT_TLV("DAC Playback Volume", RK817_CODEC_DDAC_VOLL,
+	SOC_DOUBLE_R_EXT_TLV("Playback Volume", RK817_CODEC_DDAC_VOLL,
 			     RK817_CODEC_DDAC_VOLR, 0, 0xff, 1,
 			     snd_soc_get_volsw, rk817_dac_vol_put,
 			     dac_vol_tlv),
