@@ -361,6 +361,12 @@ config LEDS_PCA9532_GPIO
 	  To use a pin as gpio pca9532_type in pca9532_platform data needs to
 	  set to PCA9532_TYPE_GPIO.
 
+config LEDS_ARKOS4CLONE
+	tristate "Arkos4Clone GPIO LEDs"
+	depends on LEDS_CLASS && OF && GPIOLIB && POWER_SUPPLY
+	help
+	  Battery and charge indication using the ArkOS4Clone LED ABI.
+
 config LEDS_GPIO
 	tristate "LED Support for GPIO connected LEDs"
 	depends on LEDS_CLASS
