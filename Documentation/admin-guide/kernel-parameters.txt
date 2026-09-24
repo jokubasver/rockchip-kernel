@@ -466,6 +466,11 @@
 			no delay (0).
 			Format: integer
 
+	boot_cpufreq= [ARM64,ROCKCHIP] Initial CPU policy maximum in MHz.
+			Userspace can subsequently change scaling_max_freq.
+			The value cannot enable frequencies absent from the OPP
+			table. An invalid value is ignored.
+
 	bootconfig	[KNL]
 			Extended command line options can be added to an initrd
 			and this will cause the kernel to look for it.
@@ -2797,6 +2802,17 @@
 
 	max_addr=nn[KMG]	[KNL,BOOT,ia64] All physical memory greater
 			than or equal to this physical address is ignored.
+
+	max_cpufreq= [ARM64,ROCKCHIP] Maximum available CPU OPP in MHz.
+			Higher OPPs are disabled before cpufreq builds its table.
+
+	max_ddrfreq= [ARM64,ROCKCHIP] Maximum available DMC OPP in MHz.
+			Higher OPPs are disabled before devfreq initializes.
+
+	max_gpufreq= [ARM64,ROCKCHIP] Maximum available GPU OPP in MHz.
+			Higher OPPs are disabled before devfreq initializes.
+			These limits cannot add OPPs missing from the device tree.
+			A limit below the lowest OPP is ignored.
 
 	maxcpus=	[SMP] Maximum number of processors that	an SMP kernel
 			will bring up during bootup.  maxcpus=n : n >= 0 limits

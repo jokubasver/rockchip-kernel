@@ -7,6 +7,8 @@
 #include <linux/clk.h>
 #include <linux/cpufreq.h>
 #include <linux/devfreq.h>
+#include <linux/init.h>
+#include <linux/kernel.h>
 #include <linux/mfd/syscon.h>
 #include <linux/module.h>
 #include <linux/nvmem-consumer.h>
@@ -83,6 +85,48 @@ struct otp_opp_info {
 
 static int pvtm_value[PVTM_CH_MAX][PVTM_SUB_CH_MAX];
 static int lkg_version;
+
+/* boot.ini expresses these OPP ceilings in MHz. Zero leaves the DT alone. */
+static unsigned long max_cpufreq_hz;
+static unsigned long max_gpufreq_hz;
+static unsigned long max_ddrfreq_hz;
+
+static int __init rockchip_max_freq_setup(char *value, unsigned long *limit,
+					  const char *name)
+{
+	unsigned long mhz;
+
+	if (!value || kstrtoul(value, 10, &mhz) || !mhz ||
+	    mhz > ULONG_MAX / 1000000UL) {
+		pr_warn("rockchip-opp: invalid %s value\n", name);
+		return 1;
+	}
+
+	*limit = mhz * 1000000UL;
+	pr_info("rockchip-opp: %s=%lu MHz\n", name, mhz);
+	return 1;
+}
+
+static int __init max_cpufreq_setup(char *value)
+{
+	return rockchip_max_freq_setup(value, &max_cpufreq_hz,
+				       "max_cpufreq");
+}
+__setup("max_cpufreq=", max_cpufreq_setup);
+
+static int __init max_gpufreq_setup(char *value)
+{
+	return rockchip_max_freq_setup(value, &max_gpufreq_hz,
+				       "max_gpufreq");
+}
+__setup("max_gpufreq=", max_gpufreq_setup);
+
+static int __init max_ddrfreq_setup(char *value)
+{
+	return rockchip_max_freq_setup(value, &max_ddrfreq_hz,
+				       "max_ddrfreq");
+}
+__setup("max_ddrfreq=", max_ddrfreq_setup);
 
 /*
  * temp = temp * 10
@@ -1743,6 +1787,55 @@ out:
 	return ret;
 }
 
+/*
+ * Apply the boot ceiling before cpufreq or devfreq enumerates available OPPs.
+ * Never remove the last OPP, even for a malformed or too-low request.
+ */
+static void rockchip_limit_opp_table(struct device *dev)
+{
+	struct dev_pm_opp *opp;
+	unsigned long max_rate = 0, rate, min_rate = 0;
+	int removed = 0, ret;
+
+	if (of_node_name_eq(dev->of_node, "cpu"))
+		max_rate = max_cpufreq_hz;
+	else if (of_node_name_eq(dev->of_node, "gpu"))
+		max_rate = max_gpufreq_hz;
+	else if (of_node_name_eq(dev->of_node, "dmc"))
+		max_rate = max_ddrfreq_hz;
+	if (!max_rate)
+		return;
+
+	opp = dev_pm_opp_find_freq_ceil(dev, &min_rate);
+	if (IS_ERR(opp))
+		return;
+	dev_pm_opp_put(opp);
+	if (max_rate < min_rate) {
+		dev_warn(dev, "boot OPP ceiling %lu MHz below minimum %lu MHz; ignoring\n",
+			 max_rate / 1000000UL, min_rate / 1000000UL);
+		return;
+	}
+
+	for (rate = ULONG_MAX; ; rate--) {
+		opp = dev_pm_opp_find_freq_floor(dev, &rate);
+		if (IS_ERR(opp))
+			break;
+		dev_pm_opp_put(opp);
+		if (rate <= max_rate)
+			break;
+		ret = dev_pm_opp_disable(dev, rate);
+		if (ret) {
+			dev_warn(dev, "failed to disable %lu Hz OPP: %d\n",
+				 rate, ret);
+			break;
+		}
+		removed++;
+	}
+
+	dev_info(dev, "boot OPP ceiling %lu MHz disabled %d higher OPPs\n",
+		 max_rate / 1000000UL, removed);
+}
+
 int rockchip_adjust_power_scale(struct device *dev, int scale)
 {
 	struct device_node *np;
@@ -1764,6 +1857,7 @@ int rockchip_adjust_power_scale(struct device *dev, int scale)
 	rockchip_adjust_opp_by_otp(dev, np);
 	rockchip_adjust_opp_by_mbist_vmin(dev, np);
 	rockchip_adjust_opp_by_irdrop(dev, np, &safe_rate, &max_rate);
+	rockchip_limit_opp_table(dev);
 
 	dev_info(dev, "avs=%d\n", avs);
 

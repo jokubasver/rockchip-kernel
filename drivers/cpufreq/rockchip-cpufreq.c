@@ -49,11 +49,30 @@ struct cluster_info {
 	int volt_sel;
 	bool is_idle_disabled;
 	bool is_opp_shared_dsu;
+	bool boot_limit_applied;
 	unsigned int regulator_count;
 	unsigned long rate;
 	unsigned long volt, mem_volt;
 };
 static LIST_HEAD(cluster_info_list);
+
+static unsigned int boot_cpufreq_khz;
+
+static int __init rockchip_boot_cpufreq_setup(char *value)
+{
+	unsigned int mhz;
+
+	if (!value || kstrtouint(value, 10, &mhz) || !mhz ||
+	    mhz > UINT_MAX / 1000U) {
+		pr_warn("rockchip-cpufreq: invalid boot_cpufreq value\n");
+		return 1;
+	}
+
+	boot_cpufreq_khz = mhz * 1000U;
+	pr_info("rockchip-cpufreq: boot_cpufreq=%u MHz\n", mhz);
+	return 1;
+}
+__setup("boot_cpufreq=", rockchip_boot_cpufreq_setup);
 
 static int px30_get_soc_info(struct device *dev, struct device_node *np,
 			     int *bin, int *process)
@@ -816,6 +835,26 @@ static int rockchip_cpufreq_notifier(struct notifier_block *nb,
 		return NOTIFY_BAD;
 
 	if (event == CPUFREQ_CREATE_POLICY) {
+		/*
+		 * Initialize the user-controlled scaling_max_freq request. Userspace
+		 * can raise it later, just as with boot_cpufreq on the 4.4 kernel.
+		 */
+		if (boot_cpufreq_khz && !cluster->boot_limit_applied &&
+		    boot_cpufreq_khz < policy->cpuinfo.max_freq) {
+			unsigned int limit = max(boot_cpufreq_khz,
+						 policy->cpuinfo.min_freq);
+			int ret;
+
+			ret = freq_qos_update_request(policy->max_freq_req, limit);
+			if (ret < 0)
+				pr_warn("rockchip-cpufreq: failed to set boot limit: %d\n",
+					ret);
+			else {
+				cluster->boot_limit_applied = true;
+				pr_info("rockchip-cpufreq: initial policy max %u kHz\n",
+					limit);
+			}
+		}
 		if (rockchip_cpufreq_add_monitor(cluster, policy))
 			return NOTIFY_BAD;
 		if (rockchip_cpufreq_add_dsu_qos_req(cluster, policy))
