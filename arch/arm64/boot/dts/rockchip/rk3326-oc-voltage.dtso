@@ -1,0 +1,62 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/dts-v1/;
+/plugin/;
+
+/*
+ * Optional extended voltages for the R36S clone 5.10 DTB.
+ * Apply to the 5.10 DTB after loading it, before booti. This is separate
+ * from the always-included rk3326-oc.dtsi clock OPPs.
+ */
+/ {
+	fragment@0 {
+		target-path = "/i2c@ff180000/pmic@20/regulators/DCDC_REG1";
+		__overlay__ {
+			regulator-max-microvolt = <1400000>;
+		};
+	};
+
+	fragment@1 {
+		target-path = "/i2c@ff180000/pmic@20/regulators/DCDC_REG2";
+		__overlay__ {
+			regulator-max-microvolt = <1400000>;
+		};
+	};
+
+	fragment@2 {
+		target-path = "/gpu-opp-table";
+		__overlay__ {
+			rockchip,max-volt = <1325000>;
+
+			opp-600000000 {
+				opp-microvolt = <1300000>;
+				opp-microvolt-L0 = <1300000>;
+				opp-microvolt-L1 = <1300000>;
+				opp-microvolt-L2 = <1300000>;
+				opp-microvolt-L3 = <1300000>;
+			};
+		};
+	};
+
+	fragment@3 {
+		target-path = "/dmc-opp-table";
+		__overlay__ {
+			rockchip,max-volt = <1325000>;
+
+			opp-924000000 {
+				opp-microvolt = <1300000>;
+				opp-microvolt-L0 = <1300000>;
+				opp-microvolt-L1 = <1300000>;
+				opp-microvolt-L2 = <1300000>;
+				opp-microvolt-L3 = <1300000>;
+			};
+
+			opp-1032000000 {
+				opp-microvolt = <1300000>;
+				opp-microvolt-L0 = <1300000>;
+				opp-microvolt-L1 = <1300000>;
+				opp-microvolt-L2 = <1300000>;
+				opp-microvolt-L3 = <1300000>;
+			};
+		};
+	};
+};

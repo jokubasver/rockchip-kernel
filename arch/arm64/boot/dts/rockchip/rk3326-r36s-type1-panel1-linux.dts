@@ -14,6 +14,7 @@
 #include <dt-bindings/pinctrl/rockchip.h>
 #include "rk3326.dtsi"
 #include "rk3326-linux.dtsi"
+#include "rk3326-oc.dtsi"
 
 / {
 	model = "R36S Clone Type1";
@@ -318,14 +319,11 @@
 &cpu0_opp_table {
 	rockchip,avs = <1>;
 
-	/* Both speed bins stay within the working 1296 MHz boot limit. */
+	/* Both speed bins use the tested 1296 MHz AVS setting. */
 	rockchip,bin-scaling-sel = <
 	0               13
 	1               13
 	>;
-
-	/delete-node/ opp-1416000000;
-	/delete-node/ opp-1512000000;
 
 };
 
@@ -481,24 +479,6 @@
 		opp-microvolt-L3 = <1175000>;
 		status = "okay";
 	};
-	opp-924000000 {
-		opp-hz = /bits/ 64 <924000000>;
-		opp-microvolt = <1175000>;
-		opp-microvolt-L0 = <1175000>;
-		opp-microvolt-L1 = <1175000>;
-		opp-microvolt-L2 = <1175000>;
-		opp-microvolt-L3 = <1175000>;
-	};
-	/* Trusted firmware realizes the 4.4 tree's 1040 MHz request as 1032 MHz. */
-	opp-1032000000 {
-		opp-hz = /bits/ 64 <1032000000>;
-		opp-microvolt = <1200000>;
-		opp-microvolt-L0 = <1200000>;
-		opp-microvolt-L1 = <1200000>;
-		opp-microvolt-L2 = <1200000>;
-		opp-microvolt-L3 = <1200000>;
-	};
-
 };
 
 
@@ -548,14 +528,6 @@
 		opp-microvolt-L3 = <1175000>;
 	};
 	opp-520000000 {
-		opp-microvolt = <1175000>;
-		opp-microvolt-L0 = <1175000>;
-		opp-microvolt-L1 = <1175000>;
-		opp-microvolt-L2 = <1175000>;
-		opp-microvolt-L3 = <1175000>;
-	};
-	opp-600000000 {
-		opp-hz = /bits/ 64 <600000000>;
 		opp-microvolt = <1175000>;
 		opp-microvolt-L0 = <1175000>;
 		opp-microvolt-L1 = <1175000>;

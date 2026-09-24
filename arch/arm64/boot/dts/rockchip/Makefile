@@ -42,6 +42,16 @@ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3326-evb-lp3-v11-avb.dtb
 dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3326-evb-lp3-v12-linux.dtb
 dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3326-odroid-go2.dtb
 dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3326-r36s-type1-panel1-linux.dtb
+
+# Optional high-voltage overlay for the R36S clone 5.10 DTB.
+always-$(CONFIG_ARCH_ROCKCHIP) += rk3326-oc-voltage.dtbo
+
+quiet_cmd_dtbo = DTC     $@
+      cmd_dtbo = $(DTC) -@ -I dts -O dtb -o $@ $<
+
+$(obj)/rk3326-oc-voltage.dtbo: $(src)/rk3326-oc-voltage.dtso $(DTC) FORCE
+	$(call if_changed,dtbo)
+
 dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3326-863-lp3-v10.dtb
 dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3326-863-lp3-v10-avb.dtb
 dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3326-863-lp3-v10-rkisp1.dtb
