@@ -86,10 +86,22 @@ struct otp_opp_info {
 static int pvtm_value[PVTM_CH_MAX][PVTM_SUB_CH_MAX];
 static int lkg_version;
 
-/* boot.ini expresses these OPP ceilings in MHz. Zero leaves the DT alone. */
+/* boot.ini expresses these OPP ceilings in MHz. */
 static unsigned long max_cpufreq_hz;
 static unsigned long max_gpufreq_hz;
 static unsigned long max_ddrfreq_hz;
+
+static unsigned long rockchip_cpu_max_freq(void)
+{
+	if (max_cpufreq_hz)
+		return max_cpufreq_hz;
+
+	/* Match the 4.4 boot default, even when boot.ini omits the argument. */
+	if (of_machine_is_compatible("rockchip,rk3326-r36s-linux"))
+		return 1296000000UL;
+
+	return 0;
+}
 
 static int __init rockchip_max_freq_setup(char *value, unsigned long *limit,
 					  const char *name)
@@ -1798,7 +1810,7 @@ static void rockchip_limit_opp_table(struct device *dev)
 	int removed = 0, ret;
 
 	if (of_node_name_eq(dev->of_node, "cpu"))
-		max_rate = max_cpufreq_hz;
+		max_rate = rockchip_cpu_max_freq();
 	else if (of_node_name_eq(dev->of_node, "gpu"))
 		max_rate = max_gpufreq_hz;
 	else if (of_node_name_eq(dev->of_node, "dmc"))
@@ -1878,6 +1890,29 @@ int rockchip_adjust_power_scale(struct device *dev, int scale)
 	if (safe_rate)
 		irdrop_scale = rockchip_pll_clk_rate_to_scale(clk, safe_rate);
 	target_scale = max(irdrop_scale, scale);
+	if (max_cpufreq_hz &&
+	    of_machine_is_compatible("rockchip,rk3326-r36s-linux") &&
+	    of_node_name_eq(dev->of_node, "cpu")) {
+		int selected_scale;
+
+		/*
+		 * The DT speed-bin scale is 13 (1296 MHz). At higher requested
+		 * rates the PLL would otherwise run at 1296 MHz while reporting
+		 * the requested rate through pll->scaling.
+		 */
+		selected_scale = rockchip_pll_clk_rate_to_scale(clk,
+							      max_cpufreq_hz);
+		if (selected_scale >= 0) {
+			target_scale = max(irdrop_scale, selected_scale);
+			dev_info(dev, "selected CPU PLL scale %u for %lu MHz\n",
+				 target_scale, max_cpufreq_hz / 1000000UL);
+			if (!target_scale) {
+				ret = rockchip_pll_clk_adaptive_scaling(clk, 0);
+				if (ret)
+					dev_err(dev, "Failed to clear PLL scaling\n");
+			}
+		}
+	}
 	if (target_scale <= 0)
 		goto out_clk;
 	dev_dbg(dev, "target_scale=%d, irdrop_scale=%d, scale=%d\n",
@@ -1899,6 +1934,9 @@ int rockchip_adjust_power_scale(struct device *dev, int scale)
 				avs_scale);
 			goto out_clk;
 		}
+		if (of_node_name_eq(dev->of_node, "cpu") &&
+		    rockchip_cpu_max_freq() > scale_rate)
+			scale_rate = rockchip_cpu_max_freq();
 		dev_dbg(dev, "scale_rate=%lu\n", scale_rate);
 		ret = rockchip_adjust_opp_table(dev, scale_rate);
 		if (ret)
@@ -1914,6 +1952,9 @@ int rockchip_adjust_power_scale(struct device *dev, int scale)
 				target_scale);
 			goto out_clk;
 		}
+		if (of_node_name_eq(dev->of_node, "cpu") &&
+		    rockchip_cpu_max_freq() > scale_rate)
+			scale_rate = rockchip_cpu_max_freq();
 		dev_dbg(dev, "scale_rate=%lu\n", scale_rate);
 		ret = rockchip_adjust_opp_table(dev, scale_rate);
 		if (ret)
