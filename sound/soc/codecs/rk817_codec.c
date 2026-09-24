@@ -108,13 +108,6 @@ struct rk817_codec_priv {
  */
 static const DECLARE_TLV_DB_MINMAX(adc_vol_tlv, -9500, 0);
 
-/*
- * DAC L/R Volume setting
- * -1.125db~-95db,0.375db/step
- * 0~2 are not allowed to use
- */
-static const DECLARE_TLV_DB_MINMAX(dac_vol_tlv, -9500, -112);
-
 /* MIC_BOOST {0, +10, +20, +30} dB */
 static const DECLARE_TLV_DB_SCALE(adc_bst_tlv, 0, 1000, 0);
 
@@ -988,9 +981,46 @@ static int rk817_resume_path_put(struct snd_kcontrol *kcontrol,
 }
 
 /*
- * Keep the 0..255 ALSA volume scale used by clone userspace while avoiding
- * DAC register values 0..2, which the RK817 cannot use.
+ * The DAC attenuates by 0.375 dB per register step. Mapping the full 95 dB
+ * range linearly to the UI leaves almost all audible change above 75%.
+ * Give the audible range roughly one DAC step per UI percent, with a steeper
+ * taper below 25% and register 255 (practical silence) at 0%.
+ *
+ * Percent:   0    1    5   10   25   50   75  100
+ * Register: 255  160  133  107   78   53   28    3
+ * The 0..255 ALSA scale is kept for clone userspace and its hotkeys.
  */
+static unsigned int rk817_dac_percent_to_reg(unsigned int percent)
+{
+	if (!percent)
+		return RK817_DAC_VOL_MAX;
+	if (percent <= 5)
+		return 160 - DIV_ROUND_CLOSEST((percent - 1) * 27, 4);
+	if (percent <= 10)
+		return 133 - DIV_ROUND_CLOSEST((percent - 5) * 26, 5);
+	if (percent <= 25)
+		return 107 - DIV_ROUND_CLOSEST((percent - 10) * 29, 15);
+	return RK817_DAC_VOL_MIN + 100 - percent;
+}
+
+static unsigned int rk817_dac_reg_to_percent(unsigned int reg)
+{
+	unsigned int percent, closest = 0, best_diff = RK817_DAC_VOL_MAX + 1;
+
+	for (percent = 0; percent <= 100; percent++) {
+		unsigned int candidate = rk817_dac_percent_to_reg(percent);
+		unsigned int diff = candidate > reg ?
+				    candidate - reg : reg - candidate;
+
+		if (diff < best_diff) {
+			best_diff = diff;
+			closest = percent;
+		}
+	}
+
+	return closest;
+}
+
 static int rk817_dac_vol_get(struct snd_kcontrol *kcontrol,
 			    struct snd_ctl_elem_value *ucontrol)
 {
@@ -1002,12 +1032,12 @@ static int rk817_dac_vol_get(struct snd_kcontrol *kcontrol,
 
 	for (i = 0; i < 2; i++) {
 		long value = ucontrol->value.integer.value[i];
+		unsigned int reg = RK817_DAC_VOL_MAX -
+			clamp_t(long, value, 0, RK817_DAC_VOL_MAX);
+		unsigned int percent = rk817_dac_reg_to_percent(reg);
 
-		value = min_t(long, value,
-			      RK817_DAC_VOL_MAX - RK817_DAC_VOL_MIN);
 		ucontrol->value.integer.value[i] =
-			DIV_ROUND_CLOSEST(value * RK817_DAC_VOL_MAX,
-					  RK817_DAC_VOL_MAX - RK817_DAC_VOL_MIN);
+			DIV_ROUND_CLOSEST(percent * RK817_DAC_VOL_MAX, 100);
 	}
 
 	return 0;
@@ -1027,11 +1057,11 @@ static int rk817_dac_vol_put(struct snd_kcontrol *kcontrol,
 
 	for (i = 0; i < 2; i++) {
 		long value = ucontrol->value.integer.value[i];
+		unsigned int percent =
+			DIV_ROUND_CLOSEST(value * 100, RK817_DAC_VOL_MAX);
 
 		ucontrol->value.integer.value[i] =
-			DIV_ROUND_CLOSEST(value *
-					  (RK817_DAC_VOL_MAX - RK817_DAC_VOL_MIN),
-					  RK817_DAC_VOL_MAX);
+			RK817_DAC_VOL_MAX - rk817_dac_percent_to_reg(percent);
 	}
 
 	return snd_soc_put_volsw(kcontrol, ucontrol);
@@ -1047,10 +1077,9 @@ static struct snd_kcontrol_new rk817_snd_controls[] = {
 	SOC_ENUM_EXT("Resume Path", rk817_resume_path_type,
 		     rk817_resume_path_get, rk817_resume_path_put),
 
-	SOC_DOUBLE_R_EXT_TLV("Playback Volume", RK817_CODEC_DDAC_VOLL,
-			     RK817_CODEC_DDAC_VOLR, 0, RK817_DAC_VOL_MAX, 1,
-			     rk817_dac_vol_get, rk817_dac_vol_put,
-			     dac_vol_tlv),
+	SOC_DOUBLE_R_EXT("Playback Volume", RK817_CODEC_DDAC_VOLL,
+			 RK817_CODEC_DDAC_VOLR, 0, RK817_DAC_VOL_MAX, 1,
+			 rk817_dac_vol_get, rk817_dac_vol_put),
 
 	SOC_DOUBLE_R_TLV("ADC Capture Volume", RK817_CODEC_DADC_VOLL,
 			 RK817_CODEC_DADC_VOLR, 0, 0xff, 1, adc_vol_tlv),
