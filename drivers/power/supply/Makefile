@@ -105,7 +105,11 @@ obj-$(CONFIG_CHARGER_BD99954)	+= bd99954-charger.o
 obj-$(CONFIG_CHARGER_WILCO)	+= wilco-charger.o
 obj-$(CONFIG_RN5T618_POWER)	+= rn5t618_power.o
 obj-$(CONFIG_BATTERY_RK816)	+= rk816_battery.o
+ifeq ($(CONFIG_BATTERY_RK817_ARKOS4CLONE),y)
+obj-$(CONFIG_BATTERY_RK817)	+= rk817_battery_arkos4clone.o
+else
 obj-$(CONFIG_BATTERY_RK817)	+= rk817_battery.o
+endif
 obj-$(CONFIG_CHARGER_RK817)	+= rk817_charger.o
 obj-$(CONFIG_BATTERY_RK818)	+= rk818_battery.o
 obj-$(CONFIG_CHARGER_RK818)	+= rk818_charger.o
