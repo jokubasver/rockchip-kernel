@@ -638,6 +638,11 @@ static int rockchip_cpufreq_cluster_init(int cpu, struct cluster_info *cluster)
 	rockchip_init_pvtpll_table(&cluster->opp_info, bin);
 	rockchip_get_scale_volt_sel(dev, "cpu_leakage", reg_name, bin, process,
 				    &cluster->scale, &cluster->volt_sel);
+
+	/* Output CPU binning info for ES */
+	pr_info("es_info: cpu_bin=%d process=%d scale=%d volt_sel=%d\n",
+		bin, process, cluster->scale, cluster->volt_sel);
+
 	if (opp_info->data && opp_info->data->set_soc_info)
 		opp_info->data->set_soc_info(dev, np, bin, process, cluster->volt_sel);
 	pname_table = rockchip_set_opp_prop_name(dev, process, cluster->volt_sel);
