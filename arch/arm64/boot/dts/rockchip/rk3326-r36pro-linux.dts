@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+* Copyright (c) 2025 kk&lcdyk
+*
+* 稀范科技 R36Pro
+*
+*/
+
+/dts-v1/;
+#include "rk3326-hg36-linux.dts"
+
+/ {
+	model = "XiFan R36Pro";
+	compatible = "rockchip,rk3326-r36pro-linux", "rockchip,rk3326";
+};
+
+&rk817_codec {
+	spk-ctl-gpios = <&gpio3 RK_PA7 GPIO_ACTIVE_HIGH>;
+	spk-mute-delay-ms = <50>;
+	use-ext-amplifier;
+};

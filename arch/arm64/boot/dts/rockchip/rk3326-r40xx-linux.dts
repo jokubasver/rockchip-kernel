@@ -1,0 +1,53 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+* Copyright (c) 2026 kk&lcdyk
+*
+* GameConsole R40XX
+*
+*/
+
+/dts-v1/;
+#include "rk3326-r46h-linux.dts"
+
+/ {
+	model = "GameConsole R40xx";
+	compatible = "rockchip,rk3326-r40xx-linux", "rockchip,rk3326";
+};
+
+&joypad {
+	sw14 {
+		gpios = <&gpio0 RK_PA7 GPIO_ACTIVE_LOW>;
+		label = "GPIO F6";
+		linux,code = <BTN_TRIGGER_HAPPY6>;
+	};
+};
+
+&pinctrl {
+	btns {
+		btn_pins: btn-pins {
+			rockchip,pins =
+			<2 RK_PA1 RK_FUNC_GPIO &pcfg_pull_up>,
+			<2 RK_PA0 RK_FUNC_GPIO &pcfg_pull_up>,
+			<1 RK_PB4 RK_FUNC_GPIO &pcfg_pull_up>,
+			<1 RK_PB5 RK_FUNC_GPIO &pcfg_pull_up>,
+			<1 RK_PB6 RK_FUNC_GPIO &pcfg_pull_up>,
+			<1 RK_PB7 RK_FUNC_GPIO &pcfg_pull_up>,
+			<1 RK_PA2 RK_FUNC_GPIO &pcfg_pull_up>,
+			<1 RK_PA5 RK_FUNC_GPIO &pcfg_pull_up>,
+			<1 RK_PA6 RK_FUNC_GPIO &pcfg_pull_up>,
+			<1 RK_PA7 RK_FUNC_GPIO &pcfg_pull_up>,
+			<2 RK_PA2 RK_FUNC_GPIO &pcfg_pull_up>,
+			<2 RK_PA3 RK_FUNC_GPIO &pcfg_pull_up>,
+			<2 RK_PA4 RK_FUNC_GPIO &pcfg_pull_up>,
+			<0 RK_PA7 RK_FUNC_GPIO &pcfg_pull_up>,
+			<2 RK_PA6 RK_FUNC_GPIO &pcfg_pull_up>,
+			<2 RK_PA7 RK_FUNC_GPIO &pcfg_pull_up>,
+			<3 RK_PB1 RK_FUNC_GPIO &pcfg_pull_up>,
+			<3 RK_PB7 RK_FUNC_GPIO &pcfg_pull_up>,
+			<3 RK_PB2 RK_FUNC_GPIO &pcfg_pull_up>,
+			<3 RK_PB4 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+	};
+};
+
+/* DON'T PUT ANYTHING BELOW HERE.  PUT IT ABOVE PINCTRL */

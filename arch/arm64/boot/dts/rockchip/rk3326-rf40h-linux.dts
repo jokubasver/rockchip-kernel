@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+* Copyright (c) 2025 kk&lcdyk
+*
+* 稀范科技 RF40H
+*
+*/
+
+/dts-v1/;
+#include "rk3326-xf40h-linux.dts"
+
+/ {
+	model = "XiFan RF40H";
+	compatible = "rockchip,rk3326-rf40h-linux", "rockchip,rk3326";
+};

@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+* Copyright (c) 2025 kk&lcdyk
+*
+* Kinhank K36 原始屏幕
+*
+*/
+
+/dts-v1/;
+#include "rk3326-hg36-linux.dts"
+
+/ {
+	model = "Kinhank K36";
+	compatible = "rockchip,rk3326-k36-linux", "rockchip,rk3326";
+};
+
+&joypad {
+	invert-absrx;
+	invert-absry;
+};

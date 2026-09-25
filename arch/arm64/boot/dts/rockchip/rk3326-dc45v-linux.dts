@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+* Copyright (c) 2026 kk&lcdyk
+*
+* 稀范科技 DC45V
+*
+*/
+
+/dts-v1/;
+#include "rk3326-r36max2-linux.dts"
+
+/ {
+	model = "XiFan DC45V";
+	compatible = "rockchip,rk3326-dc45v-linux", "rockchip,rk3326";
+};

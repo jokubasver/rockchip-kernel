@@ -1,0 +1,149 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+* Copyright (c) 2026 kk&lcdyk
+*
+* GameConsole R40S
+*
+*/
+
+/dts-v1/;
+#include "rk3326-r36s-panel0-linux.dts"
+
+/ {
+	model = "GameConsole R40S";
+	compatible = "rockchip,rk3326-r40s-linux", "rockchip,rk3326";
+
+
+	backlight: backlight {
+		compatible = "pwm-backlight";
+		pwms = <&pwm1 0 25000 0>;
+		brightness-levels = <
+		0   1   2   3   4   5   6   7
+		8   9  10  11  12  13  14  15
+		16  17  18  19  20  21  22  23
+		24  25  26  27  28  29  30  31
+		32  33  34  35  36  37  38  39
+		40  41  42  43  44  45  46  47
+		48  49  50  51  52  53  54  55
+		56  57  58  59  60  61  62  63
+		64  65  66  67  68  69  70  71
+		72  73  74  75  76  77  78  79
+		80  81  82  83  84  85  86  87
+		88  89  90  91  92  93  94  95
+		96  97  98  99 100 101 102 103
+		104 105 106 107 108 109 110 111
+		112 113 114 115 116 117 118 119
+		120 121 122 123 124 125 126 127
+		128 129 130 131 132 133 134 135
+		136 137 138 139 140 141 142 143
+		144 145 146 147 148 149 150 151
+		152 153 154 155 156 157 158 159
+		160 161 162 163 164 165 166 167
+		168 169 170 171 172 173 174 175
+		176 177 178 179 180 181 182 183
+		184 185 186 187 188 189 190 191
+		192 193 194 195 196 197 198 199
+		200 201 202 203 204 205 206 207
+		208 209 210 211 212 213 214 215
+		216 217 218 219 220 221 222 223
+		224 225 226 227 228 229 230 231
+		232 233 234 235 236 237 238 239
+		240 241 242 243 244 245 246 247
+		248 249 250 251 252 253 254 255>;
+		default-brightness-level = <200>;
+	};
+};
+
+&joypad {
+	sw15 {
+		gpios = <&gpio2 RK_PA7 GPIO_ACTIVE_LOW>;
+	};
+	sw16 {
+		gpios = <&gpio2 RK_PA6 GPIO_ACTIVE_LOW>;
+	};
+	sw19 {
+		gpios = <&gpio3 RK_PB2 GPIO_ACTIVE_LOW>;
+	};
+	sw20 {
+		gpios = <&gpio3 RK_PB4 GPIO_ACTIVE_LOW>;//占位用
+	};
+	sw21 {
+		gpios = <&gpio3 RK_PB1 GPIO_ACTIVE_LOW>;//占位用
+	};
+	sw22 {
+		gpios = <&gpio3 RK_PB7 GPIO_ACTIVE_LOW>;
+	};
+};
+
+&dsi {
+	status = "okay";
+
+	panel@0 {
+		compatible = "simple-panel-dsi";
+		reg = <0>;
+		/* pwm1 backlight */
+		backlight = <&backlight>;
+		/* RK817 LDO7 */
+		backlight-supply = <&vcc_backlight>;
+		/* RK817 LDO8 */
+		power-supply = <&vcc_lcd>;
+		/* Rev 0.2 LCD reset gpio GPIO3.C0 */
+		reset-gpios = <&gpio3 RK_PC0 GPIO_ACTIVE_LOW>;
+		prepare-delay-ms = <2>;
+		reset-delay-ms = <1>;
+		init-delay-ms = <20>;
+		enable-delay-ms = <120>;
+		disable-delay-ms = <50>;
+		unprepare-delay-ms = <20>;
+		width-mm = <42>;
+		height-mm = <82>;
+		dsi,flags  = <(MIPI_DSI_MODE_VIDEO |
+		MIPI_DSI_MODE_VIDEO_BURST |
+		MIPI_DSI_MODE_LPM |
+		MIPI_DSI_MODE_EOT_PACKET)>;
+		dsi,format = <MIPI_DSI_FMT_RGB888>;
+		dsi,lanes = <2>;
+		panel-init-sequence = <0x5000120 0x5000129 0x15000236 0x150002 0x3a703900 0x4b10605 0xa390003 0xb220c815 0x2b302 0x150002b5 0x40390007 0xb6070f02 0x4010e839 0x6c307 0x4030302 0x390007c4 0x12241818 0x2491500 0x2c56939 0x4c641 0x63033900 0xad00024 0x67020000 0x20000239 0xad100 0x24670200 0x200002 0x39000ad2 0x246702 0x2000 0x239000a 0xd3002467 0x2000020 0x23900 0xad40024 0x67020000 0x20000239 0xad500 0x24670200 0x200002 0x5c80111>;
+		panel-exit-sequence = <0x5000128 0x5000110>;
+
+		display-timings {
+			native-mode = <&timing1>;
+
+			// 30.00MHz / (480+10+12+50)×(800+20+10+30) = 552×860 = 63.20 Hz
+			timing0: original {
+				clock-frequency = <30000000>;
+				hactive = <480>;
+				vactive = <800>;
+				hsync-len = <12>;
+				hback-porch = <50>;
+				hfront-porch = <10>;
+				vsync-len = <10>;
+				vback-porch = <30>;
+				vfront-porch = <20>;
+				hsync-active = <0>;
+				vsync-active = <0>;
+				de-active = <0>;
+				pixelclk-active = <0>;
+			};
+
+			// 30.00MHz / (480+10+12+50)×(800+66+10+30) = 552×906 = 59.99 Hz
+			timing1: adjust {
+				clock-frequency = <30000000>;
+				hactive = <480>;
+				vactive = <800>;
+				hsync-len = <12>;
+				hback-porch = <50>;
+				hfront-porch = <10>;
+				vsync-len = <10>;
+				vback-porch = <30>;
+				vfront-porch = <66>;
+				hsync-active = <0>;
+				vsync-active = <0>;
+				de-active = <0>;
+				pixelclk-active = <0>;
+			};
+		};
+	};
+};
+
+/* DON'T PUT ANYTHING BELOW HERE.  PUT IT ABOVE PINCTRL */
