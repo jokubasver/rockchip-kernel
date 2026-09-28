@@ -11,6 +11,7 @@
 #include <linux/input.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/property.h>
@@ -19,6 +20,7 @@
 struct adc_keys_button {
 	u32 voltage;
 	u32 keycode;
+	int raw;	/* sysfs tuning value in raw ADC codes */
 };
 
 struct adc_keys_state {
@@ -26,7 +28,17 @@ struct adc_keys_state {
 	u32 num_keys;
 	u32 last_key;
 	u32 keyup_voltage;
-	const struct adc_keys_button *map;
+	struct adc_keys_button *map;
+	/* raw ADC tuning, disabled when raw_bits == 0 */
+	struct mutex tune_lock;
+	u32 vref_mv;
+	u32 raw_bits;
+	int raw_max;
+};
+
+struct adc_keys_attr {
+	struct device_attribute dattr;
+	u32 keycode;
 };
 
 static void adc_keys_poll(struct input_dev *input)
@@ -42,7 +54,7 @@ static void adc_keys_poll(struct input_dev *input)
 		value = st->keyup_voltage;
 	} else {
 		for (i = 0; i < st->num_keys; i++) {
-			diff = abs(st->map[i].voltage - value);
+			diff = abs(READ_ONCE(st->map[i].voltage) - value);
 			if (diff < closest) {
 				closest = diff;
 				keycode = st->map[i].keycode;
@@ -61,6 +73,42 @@ static void adc_keys_poll(struct input_dev *input)
 
 	input_sync(input);
 	st->last_key = keycode;
+}
+
+/*
+ * Raw ADC tuning needs a linear scale of 2^bits codes over vref, which is
+ * how SAR ADCs such as rockchip-saradc report it.
+ */
+static void adc_keys_init_tuning(struct device *dev, struct adc_keys_state *st)
+{
+	int val, val2, ret;
+
+	mutex_init(&st->tune_lock);
+
+	ret = iio_read_channel_scale(st->channel, &val, &val2);
+	if (ret != IIO_VAL_FRACTIONAL_LOG2 || val <= 0 || val2 <= 0 ||
+	    val2 > 16) {
+		dev_dbg(dev, "no linear raw scale, ADC tuning disabled\n");
+		return;
+	}
+
+	st->vref_mv = val;
+	st->raw_bits = val2;
+	st->raw_max = BIT(val2) - 1;
+}
+
+/* Round to nearest, so thresholds derived from raw codes map back exactly */
+static int adc_keys_uv_to_raw(const struct adc_keys_state *st, u32 uv)
+{
+	u64 raw;
+
+	if (!st->raw_bits)
+		return -1;
+
+	raw = DIV_ROUND_CLOSEST_ULL((u64)uv << st->raw_bits,
+				    st->vref_mv * 1000);
+
+	return min_t(u64, raw, st->raw_max);
 }
 
 static int adc_keys_load_keymap(struct device *dev, struct adc_keys_state *st)
@@ -87,6 +135,7 @@ static int adc_keys_load_keymap(struct device *dev, struct adc_keys_state *st)
 			fwnode_handle_put(child);
 			return -EINVAL;
 		}
+		map[i].raw = adc_keys_uv_to_raw(st, map[i].voltage);
 		map[i].voltage /= 1000;
 
 		if (fwnode_property_read_u32(child, "linux,code",
@@ -102,6 +151,110 @@ static int adc_keys_load_keymap(struct device *dev, struct adc_keys_state *st)
 	st->map = map;
 	return 0;
 }
+
+static struct adc_keys_button *adc_keys_find(struct adc_keys_state *st,
+					     u32 keycode)
+{
+	u32 i;
+
+	for (i = 0; i < st->num_keys; i++)
+		if (st->map[i].keycode == keycode)
+			return &st->map[i];
+
+	return NULL;
+}
+
+static struct adc_keys_button *adc_keys_attr_button(struct device *dev,
+						    struct device_attribute *attr)
+{
+	struct adc_keys_state *st = dev_get_drvdata(dev);
+	struct adc_keys_attr *kattr = container_of(attr, struct adc_keys_attr,
+						   dattr);
+
+	return adc_keys_find(st, kattr->keycode);
+}
+
+/*
+ * adc_value_volume_{up,down}: press level in raw ADC codes, same format
+ * and range as the rk_keys attributes. A new value is used from the next
+ * poll and is not persistent.
+ */
+static ssize_t adc_value_show(struct device *dev,
+			      struct device_attribute *attr, char *buf)
+{
+	struct adc_keys_state *st = dev_get_drvdata(dev);
+	struct adc_keys_button *button = adc_keys_attr_button(dev, attr);
+	int raw;
+
+	mutex_lock(&st->tune_lock);
+	raw = button->raw;
+	mutex_unlock(&st->tune_lock);
+
+	return sysfs_emit(buf, "%d\n", raw);
+}
+
+static ssize_t adc_value_store(struct device *dev,
+			       struct device_attribute *attr,
+			       const char *buf, size_t count)
+{
+	struct adc_keys_state *st = dev_get_drvdata(dev);
+	struct adc_keys_button *button = adc_keys_attr_button(dev, attr);
+	int raw, mv, ret;
+
+	ret = kstrtoint(buf, 0, &raw);
+	if (ret)
+		return ret;
+
+	if (raw < 0 || raw > st->raw_max)
+		return -EINVAL;
+
+	/* Same raw to mV conversion the poll path applies to readings */
+	ret = iio_convert_raw_to_processed(st->channel, raw, &mv, 1);
+	if (ret)
+		return ret;
+
+	mutex_lock(&st->tune_lock);
+	button->raw = raw;
+	WRITE_ONCE(button->voltage, mv);
+	mutex_unlock(&st->tune_lock);
+
+	return count;
+}
+
+#define ADC_KEYS_ATTR(_name, _code)					\
+	struct adc_keys_attr adc_keys_attr_##_name = {			\
+		.dattr = __ATTR(adc_value_##_name, 0644,		\
+				adc_value_show, adc_value_store),	\
+		.keycode = _code,					\
+	}
+
+static ADC_KEYS_ATTR(volume_up, KEY_VOLUMEUP);
+static ADC_KEYS_ATTR(volume_down, KEY_VOLUMEDOWN);
+
+static struct attribute *adc_keys_attrs[] = {
+	&adc_keys_attr_volume_up.dattr.attr,
+	&adc_keys_attr_volume_down.dattr.attr,
+	NULL
+};
+
+static umode_t adc_keys_attr_is_visible(struct kobject *kobj,
+					struct attribute *attr, int n)
+{
+	struct adc_keys_state *st = dev_get_drvdata(kobj_to_dev(kobj));
+	struct adc_keys_attr *kattr = container_of(attr, struct adc_keys_attr,
+						   dattr.attr);
+
+	if (!st->raw_bits || !adc_keys_find(st, kattr->keycode))
+		return 0;
+
+	return attr->mode;
+}
+
+static const struct attribute_group adc_keys_group = {
+	.attrs = adc_keys_attrs,
+	.is_visible = adc_keys_attr_is_visible,
+};
+__ATTRIBUTE_GROUPS(adc_keys);
 
 static int adc_keys_probe(struct platform_device *pdev)
 {
@@ -139,9 +292,13 @@ static int adc_keys_probe(struct platform_device *pdev)
 	}
 	st->keyup_voltage /= 1000;
 
+	adc_keys_init_tuning(dev, st);
+
 	error = adc_keys_load_keymap(dev, st);
 	if (error)
 		return error;
+
+	platform_set_drvdata(pdev, st);
 
 	input = devm_input_allocate_device(dev);
 	if (!input) {
@@ -197,6 +354,7 @@ static struct platform_driver __refdata adc_keys_driver = {
 	.driver = {
 		.name = "adc_keys",
 		.of_match_table = of_match_ptr(adc_keys_of_match),
+		.dev_groups = adc_keys_groups,
 	},
 	.probe = adc_keys_probe,
 };
