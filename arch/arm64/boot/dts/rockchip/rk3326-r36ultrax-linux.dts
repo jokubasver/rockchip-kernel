@@ -632,9 +632,7 @@
 
 		regulators {
 			vdd_logic: DCDC_REG1 {
-				/* DMC is fixed at its boot rate: retain a safe shared-rail
-				 * floor when GPU/bus DVFS requests a lower voltage.
-				 */
+				/* Shared DMC/GPU rail floor; their OPPs run at 1.175 V. */
 				regulator-always-on;
 				regulator-boot-on;
 				regulator-min-microvolt = <1175000>;
