@@ -850,6 +850,8 @@
 			pinctrl-0 = <&i2s1_2ch_mclk>;
 			hp-volume = <20>;
 			spk-volume = <3>;
+			/* Tuned R36S Playback taper; volume-min-db is not used. */
+			rockchip,dac-volume-taper;
 			volume-min-db = <72>;  /* -90*0.5 = -45 */
 			status = "okay";
 		};

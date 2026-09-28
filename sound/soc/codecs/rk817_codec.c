@@ -66,6 +66,8 @@
 
 #define RK817_DAC_VOL_MIN 3
 #define RK817_DAC_VOL_MAX 255
+/* -6.75 dB: the ArkOS 4.4 maximum, used outside the tuned taper */
+#define RK817_DAC_VOL_CAP 0x12
 
 struct rk817_codec_priv {
 	struct snd_soc_component *component;
@@ -98,7 +100,23 @@ struct rk817_codec_priv {
 	int spk_mute_delay;
 	int hp_mute_delay;
 	int chip_ver;
+
+	/* Playback Volume: tuned taper, or the 4.4 map above volume-min-db */
+	bool dac_vol_taper;
+	unsigned int dac_vol_floor;
+	/* User DAC volume registers, restored after power-up and path changes */
+	unsigned int dac_vol[2];
 };
+
+static void rk817_dac_vol_apply(struct snd_soc_component *component)
+{
+	struct rk817_codec_priv *rk817 = snd_soc_component_get_drvdata(component);
+
+	snd_soc_component_write(component, RK817_CODEC_DDAC_VOLL,
+				rk817->dac_vol[0]);
+	snd_soc_component_write(component, RK817_CODEC_DDAC_VOLR,
+				rk817->dac_vol[1]);
+}
 
 /*
  * DADC L/R volume setting
@@ -476,6 +494,8 @@ static int rk817_codec_power_up(struct snd_soc_component *component, int type)
 						playback_power_up_list[i].reg,
 						playback_power_up_list[i].value);
 		}
+		/* The list resets the DAC volume; keep the user's setting. */
+		rk817_dac_vol_apply(component);
 
 		/* configure APLL CFG0/4 */
 		if (rk817->chip_ver <= 0x4) {
@@ -714,10 +734,7 @@ static int rk817_playback_path_config(struct snd_soc_component *component,
 						      RK817_CODEC_DDAC_MUTE_MIXCTL,
 						      DACMT_ENABLE, DACMT_DISABLE);
 		}
-		snd_soc_component_write(component, RK817_CODEC_DDAC_VOLL,
-					rk817->spk_volume);
-		snd_soc_component_write(component, RK817_CODEC_DDAC_VOLR,
-					rk817->spk_volume);
+		rk817_dac_vol_apply(component);
 		break;
 	case HP_PATH:
 	case HP_NO_MIC:
@@ -737,10 +754,7 @@ static int rk817_playback_path_config(struct snd_soc_component *component,
 					      RK817_CODEC_DDAC_MUTE_MIXCTL,
 					      DACMT_ENABLE, DACMT_DISABLE);
 
-		snd_soc_component_write(component, RK817_CODEC_DDAC_VOLL,
-					rk817->hp_volume);
-		snd_soc_component_write(component, RK817_CODEC_DDAC_VOLR,
-					rk817->hp_volume);
+		rk817_dac_vol_apply(component);
 		break;
 	case BT:
 		break;
@@ -774,10 +788,7 @@ static int rk817_playback_path_config(struct snd_soc_component *component,
 						0xf7);
 		}
 
-		snd_soc_component_write(component, RK817_CODEC_DDAC_VOLL,
-					rk817->hp_volume);
-		snd_soc_component_write(component, RK817_CODEC_DDAC_VOLR,
-					rk817->hp_volume);
+		rk817_dac_vol_apply(component);
 		break;
 	default:
 		return -EINVAL;
@@ -1021,20 +1032,28 @@ static unsigned int rk817_dac_reg_to_percent(unsigned int reg)
 	return closest;
 }
 
-static int rk817_dac_vol_get(struct snd_kcontrol *kcontrol,
-			    struct snd_ctl_elem_value *ucontrol)
+static int rk817_dac_vol_set(struct snd_soc_component *component,
+			     const unsigned int reg[2])
 {
-	int i, ret;
+	struct rk817_codec_priv *rk817 = snd_soc_component_get_drvdata(component);
+	int changed = rk817->dac_vol[0] != reg[0] || rk817->dac_vol[1] != reg[1];
 
-	ret = snd_soc_get_volsw(kcontrol, ucontrol);
-	if (ret)
-		return ret;
+	rk817->dac_vol[0] = reg[0];
+	rk817->dac_vol[1] = reg[1];
+	rk817_dac_vol_apply(component);
+
+	return changed;
+}
+
+static int rk817_dac_vol_taper_get(struct snd_kcontrol *kcontrol,
+				   struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct rk817_codec_priv *rk817 = snd_soc_component_get_drvdata(component);
+	int i;
 
 	for (i = 0; i < 2; i++) {
-		long value = ucontrol->value.integer.value[i];
-		unsigned int reg = RK817_DAC_VOL_MAX -
-			clamp_t(long, value, 0, RK817_DAC_VOL_MAX);
-		unsigned int percent = rk817_dac_reg_to_percent(reg);
+		unsigned int percent = rk817_dac_reg_to_percent(rk817->dac_vol[i]);
 
 		ucontrol->value.integer.value[i] =
 			DIV_ROUND_CLOSEST(percent * RK817_DAC_VOL_MAX, 100);
@@ -1043,9 +1062,11 @@ static int rk817_dac_vol_get(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-static int rk817_dac_vol_put(struct snd_kcontrol *kcontrol,
-			    struct snd_ctl_elem_value *ucontrol)
+static int rk817_dac_vol_taper_put(struct snd_kcontrol *kcontrol,
+				   struct snd_ctl_elem_value *ucontrol)
 {
+	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	unsigned int reg[2];
 	int i;
 
 	for (i = 0; i < 2; i++) {
@@ -1053,19 +1074,72 @@ static int rk817_dac_vol_put(struct snd_kcontrol *kcontrol,
 
 		if (value < 0 || value > RK817_DAC_VOL_MAX)
 			return -EINVAL;
+		reg[i] = rk817_dac_percent_to_reg(
+			DIV_ROUND_CLOSEST(value * 100, RK817_DAC_VOL_MAX));
 	}
+
+	return rk817_dac_vol_set(component, reg);
+}
+
+/*
+ * The ArkOS 4.4 mapping: 0..255 spreads linearly over the DAC registers
+ * from volume-min-db (0) up to -6.75 dB (255), as the dB TLV reports.
+ */
+static int rk817_dac_vol_linear_get(struct snd_kcontrol *kcontrol,
+				    struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct rk817_codec_priv *rk817 = snd_soc_component_get_drvdata(component);
+	unsigned int range = rk817->dac_vol_floor - RK817_DAC_VOL_CAP;
+	int i;
+
+	for (i = 0; i < 2; i++) {
+		unsigned int reg = clamp(rk817->dac_vol[i], RK817_DAC_VOL_CAP,
+					 rk817->dac_vol_floor);
+
+		ucontrol->value.integer.value[i] = DIV_ROUND_CLOSEST(
+			(rk817->dac_vol_floor - reg) * RK817_DAC_VOL_MAX, range);
+	}
+
+	return 0;
+}
+
+static int rk817_dac_vol_linear_put(struct snd_kcontrol *kcontrol,
+				    struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct rk817_codec_priv *rk817 = snd_soc_component_get_drvdata(component);
+	unsigned int range = rk817->dac_vol_floor - RK817_DAC_VOL_CAP;
+	unsigned int reg[2];
+	int i;
 
 	for (i = 0; i < 2; i++) {
 		long value = ucontrol->value.integer.value[i];
-		unsigned int percent =
-			DIV_ROUND_CLOSEST(value * 100, RK817_DAC_VOL_MAX);
 
-		ucontrol->value.integer.value[i] =
-			RK817_DAC_VOL_MAX - rk817_dac_percent_to_reg(percent);
+		if (value < 0 || value > RK817_DAC_VOL_MAX)
+			return -EINVAL;
+		reg[i] = rk817->dac_vol_floor -
+			 DIV_ROUND_CLOSEST(value * range, RK817_DAC_VOL_MAX);
 	}
 
-	return snd_soc_put_volsw(kcontrol, ucontrol);
+	return rk817_dac_vol_set(component, reg);
 }
+
+/* The minimum is set from volume-min-db at probe; there is one RK817 codec. */
+static unsigned int rk817_dac_vol_tlv[] = {
+	TLV_DB_MINMAX_ITEM(-9487, -675),
+};
+
+static const struct snd_kcontrol_new rk817_dac_vol_taper_control =
+	SOC_DOUBLE_R_EXT("Playback Volume", RK817_CODEC_DDAC_VOLL,
+			 RK817_CODEC_DDAC_VOLR, 0, RK817_DAC_VOL_MAX, 1,
+			 rk817_dac_vol_taper_get, rk817_dac_vol_taper_put);
+
+static const struct snd_kcontrol_new rk817_dac_vol_linear_control =
+	SOC_DOUBLE_R_EXT_TLV("Playback Volume", RK817_CODEC_DDAC_VOLL,
+			     RK817_CODEC_DDAC_VOLR, 0, RK817_DAC_VOL_MAX, 1,
+			     rk817_dac_vol_linear_get, rk817_dac_vol_linear_put,
+			     rk817_dac_vol_tlv);
 
 static struct snd_kcontrol_new rk817_snd_controls[] = {
 	SOC_ENUM_EXT("Playback Path", rk817_playback_path_type,
@@ -1076,10 +1150,6 @@ static struct snd_kcontrol_new rk817_snd_controls[] = {
 
 	SOC_ENUM_EXT("Resume Path", rk817_resume_path_type,
 		     rk817_resume_path_get, rk817_resume_path_put),
-
-	SOC_DOUBLE_R_EXT("Playback Volume", RK817_CODEC_DDAC_VOLL,
-			 RK817_CODEC_DDAC_VOLR, 0, RK817_DAC_VOL_MAX, 1,
-			 rk817_dac_vol_get, rk817_dac_vol_put),
 
 	SOC_DOUBLE_R_TLV("ADC Capture Volume", RK817_CODEC_DADC_VOLL,
 			 RK817_CODEC_DADC_VOLR, 0, 0xff, 1, adc_vol_tlv),
@@ -1469,6 +1539,17 @@ static int rk817_probe(struct snd_soc_component *component)
 
 	snd_soc_add_component_controls(component, rk817_snd_controls,
 				       ARRAY_SIZE(rk817_snd_controls));
+
+	rk817_dac_vol_apply(component);
+	if (rk817->dac_vol_taper) {
+		snd_soc_add_component_controls(component,
+					       &rk817_dac_vol_taper_control, 1);
+	} else {
+		/* 0.375 dB per register step, in 0.01 dB */
+		rk817_dac_vol_tlv[2] = -(int)(rk817->dac_vol_floor * 75 / 2);
+		snd_soc_add_component_controls(component,
+					       &rk817_dac_vol_linear_control, 1);
+	}
 	return 0;
 }
 
@@ -1507,6 +1588,7 @@ static int rk817_codec_parse_dt_property(struct device *dev,
 					 struct rk817_codec_priv *rk817)
 {
 	struct device_node *node = dev->parent->of_node;
+	u32 min_db;
 	int ret;
 
 	DBG("%s()\n", __func__);
@@ -1595,6 +1677,21 @@ static int rk817_codec_parse_dt_property(struct device *dev,
 
 	rk817->adc_for_loopback =
 			of_property_read_bool(node, "adc-for-loopback");
+
+	rk817->dac_vol_taper =
+			of_property_read_bool(node, "rockchip,dac-volume-taper");
+	if (of_property_read_u32(node, "volume-min-db", &min_db))
+		min_db = 95;
+	/* 0.375 dB per register step, as in 4.4: 72 dB is register 192 */
+	rk817->dac_vol_floor = clamp_t(unsigned int, min_db * 8 / 3,
+				       RK817_DAC_VOL_CAP + 1, RK817_DAC_VOL_MAX);
+	/* spk-volume seeds the user volume; path changes no longer reset it */
+	rk817->dac_vol[0] = clamp_t(unsigned int, rk817->spk_volume,
+				    rk817->dac_vol_taper ? RK817_DAC_VOL_MIN :
+							   RK817_DAC_VOL_CAP,
+				    rk817->dac_vol_taper ? RK817_DAC_VOL_MAX :
+							   rk817->dac_vol_floor);
+	rk817->dac_vol[1] = rk817->dac_vol[0];
 
 	return 0;
 }
