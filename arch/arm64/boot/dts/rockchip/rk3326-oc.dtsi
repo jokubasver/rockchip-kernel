@@ -89,13 +89,14 @@
 		opp-microvolt-L2 = <1350000 1350000 1350000>;
 		opp-microvolt-L3 = <1350000 1350000 1350000>;
 	};
+	/* Never below the 1.512 GHz voltages. */
 	opp-1608000000 {
 		opp-hz = /bits/ 64 <1608000000>;
 		opp-microvolt = <1350000 1350000 1350000>;
 		opp-microvolt-L0 = <1350000 1350000 1350000>;
 		opp-microvolt-L1 = <1350000 1350000 1350000>;
-		opp-microvolt-L2 = <1300000 1300000 1350000>;
-		opp-microvolt-L3 = <1250000 1250000 1350000>;
+		opp-microvolt-L2 = <1350000 1350000 1350000>;
+		opp-microvolt-L3 = <1350000 1350000 1350000>;
 		clock-latency-ns = <40000>;
 	};
 };
