@@ -2805,6 +2805,9 @@
 
 	max_cpufreq= [ARM64,ROCKCHIP] Maximum available CPU OPP in MHz.
 			Higher OPPs are disabled before cpufreq builds its table.
+			If the CPU OPP table has "rockchip,boot-max-freq", that
+			value (Hz) is the default ceiling and this limit also
+			selects the CPU PLL scale.
 
 	max_ddrfreq= [ARM64,ROCKCHIP] Maximum available DMC OPP in MHz.
 			Higher OPPs are disabled before devfreq initializes.

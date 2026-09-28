@@ -9,7 +9,13 @@
  */
 
 &cpu0_opp_table {
+	/*
+	 * Above the 1.35 V OPPs, so rockchip_adjust_opp_by_irdrop() does not
+	 * treat the first 1.35 V OPP as the safe rate and clamp the PLL there.
+	 */
 	rockchip,max-volt = <1400000>;
+	/* ArkOS boot.ini default; also lets max_cpufreq= pick the PLL scale. */
+	rockchip,boot-max-freq = <1296000000>;
 
 	/* Complete the supported 24 MHz CPU PLL steps. */
 	opp-1320000000 {

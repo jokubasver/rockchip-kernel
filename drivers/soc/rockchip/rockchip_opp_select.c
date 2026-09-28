@@ -91,16 +91,27 @@ static unsigned long max_cpufreq_hz;
 static unsigned long max_gpufreq_hz;
 static unsigned long max_ddrfreq_hz;
 
-static unsigned long rockchip_cpu_max_freq(void)
+/*
+ * Boards opt in to the ArkOS CPU boot behaviour with "rockchip,boot-max-freq"
+ * (Hz) on the CPU OPP table: it is the ceiling when boot.ini omits
+ * max_cpufreq=, and it lets max_cpufreq= select the CPU PLL scale.
+ */
+static unsigned long rockchip_boot_max_freq(struct device *dev,
+					    struct device_node *np)
 {
+	u32 def = 0;
+
+	if (of_node_name_eq(dev->of_node, "gpu"))
+		return max_gpufreq_hz;
+	if (of_node_name_eq(dev->of_node, "dmc"))
+		return max_ddrfreq_hz;
+	if (!of_node_name_eq(dev->of_node, "cpu"))
+		return 0;
 	if (max_cpufreq_hz)
 		return max_cpufreq_hz;
 
-	/* Match the 4.4 boot default, even when boot.ini omits the argument. */
-	if (of_machine_is_compatible("rockchip,rk3326-r36s-linux"))
-		return 1296000000UL;
-
-	return 0;
+	of_property_read_u32(np, "rockchip,boot-max-freq", &def);
+	return def;
 }
 
 static int __init rockchip_max_freq_setup(char *value, unsigned long *limit,
@@ -1802,30 +1813,27 @@ out:
 /*
  * Apply the boot ceiling before cpufreq or devfreq enumerates available OPPs.
  * Never remove the last OPP, even for a malformed or too-low request.
+ * Return the applied ceiling, or 0 when there is none.
  */
-static void rockchip_limit_opp_table(struct device *dev)
+static unsigned long rockchip_limit_opp_table(struct device *dev,
+					      struct device_node *np)
 {
 	struct dev_pm_opp *opp;
-	unsigned long max_rate = 0, rate, min_rate = 0;
+	unsigned long max_rate, rate, min_rate = 0;
 	int removed = 0, ret;
 
-	if (of_node_name_eq(dev->of_node, "cpu"))
-		max_rate = rockchip_cpu_max_freq();
-	else if (of_node_name_eq(dev->of_node, "gpu"))
-		max_rate = max_gpufreq_hz;
-	else if (of_node_name_eq(dev->of_node, "dmc"))
-		max_rate = max_ddrfreq_hz;
+	max_rate = rockchip_boot_max_freq(dev, np);
 	if (!max_rate)
-		return;
+		return 0;
 
 	opp = dev_pm_opp_find_freq_ceil(dev, &min_rate);
 	if (IS_ERR(opp))
-		return;
+		return 0;
 	dev_pm_opp_put(opp);
 	if (max_rate < min_rate) {
 		dev_warn(dev, "boot OPP ceiling %lu MHz below minimum %lu MHz; ignoring\n",
 			 max_rate / 1000000UL, min_rate / 1000000UL);
-		return;
+		return 0;
 	}
 
 	for (rate = ULONG_MAX; ; rate--) {
@@ -1846,13 +1854,15 @@ static void rockchip_limit_opp_table(struct device *dev)
 
 	dev_info(dev, "boot OPP ceiling %lu MHz disabled %d higher OPPs\n",
 		 max_rate / 1000000UL, removed);
+
+	return max_rate;
 }
 
 int rockchip_adjust_power_scale(struct device *dev, int scale)
 {
 	struct device_node *np;
 	struct clk *clk;
-	unsigned long safe_rate = 0, max_rate = 0;
+	unsigned long safe_rate = 0, max_rate = 0, boot_max_rate;
 	int irdrop_scale = 0, opp_scale = 0;
 	u32 target_scale, avs = 0, avs_scale = 0;
 	long scale_rate = 0;
@@ -1869,7 +1879,7 @@ int rockchip_adjust_power_scale(struct device *dev, int scale)
 	rockchip_adjust_opp_by_otp(dev, np);
 	rockchip_adjust_opp_by_mbist_vmin(dev, np);
 	rockchip_adjust_opp_by_irdrop(dev, np, &safe_rate, &max_rate);
-	rockchip_limit_opp_table(dev);
+	boot_max_rate = rockchip_limit_opp_table(dev, np);
 
 	dev_info(dev, "avs=%d\n", avs);
 
@@ -1890,9 +1900,9 @@ int rockchip_adjust_power_scale(struct device *dev, int scale)
 	if (safe_rate)
 		irdrop_scale = rockchip_pll_clk_rate_to_scale(clk, safe_rate);
 	target_scale = max(irdrop_scale, scale);
-	if (max_cpufreq_hz &&
-	    of_machine_is_compatible("rockchip,rk3326-r36s-linux") &&
-	    of_node_name_eq(dev->of_node, "cpu")) {
+	if (max_cpufreq_hz && boot_max_rate &&
+	    of_node_name_eq(dev->of_node, "cpu") &&
+	    of_property_read_bool(np, "rockchip,boot-max-freq")) {
 		int selected_scale;
 
 		/*
@@ -1901,11 +1911,11 @@ int rockchip_adjust_power_scale(struct device *dev, int scale)
 		 * the requested rate through pll->scaling.
 		 */
 		selected_scale = rockchip_pll_clk_rate_to_scale(clk,
-							      max_cpufreq_hz);
+							      boot_max_rate);
 		if (selected_scale >= 0) {
 			target_scale = max(irdrop_scale, selected_scale);
 			dev_info(dev, "selected CPU PLL scale %u for %lu MHz\n",
-				 target_scale, max_cpufreq_hz / 1000000UL);
+				 target_scale, boot_max_rate / 1000000UL);
 			if (!target_scale) {
 				ret = rockchip_pll_clk_adaptive_scaling(clk, 0);
 				if (ret)
@@ -1935,8 +1945,8 @@ int rockchip_adjust_power_scale(struct device *dev, int scale)
 			goto out_clk;
 		}
 		if (of_node_name_eq(dev->of_node, "cpu") &&
-		    rockchip_cpu_max_freq() > scale_rate)
-			scale_rate = rockchip_cpu_max_freq();
+		    boot_max_rate > scale_rate)
+			scale_rate = boot_max_rate;
 		dev_dbg(dev, "scale_rate=%lu\n", scale_rate);
 		ret = rockchip_adjust_opp_table(dev, scale_rate);
 		if (ret)
@@ -1953,8 +1963,8 @@ int rockchip_adjust_power_scale(struct device *dev, int scale)
 			goto out_clk;
 		}
 		if (of_node_name_eq(dev->of_node, "cpu") &&
-		    rockchip_cpu_max_freq() > scale_rate)
-			scale_rate = rockchip_cpu_max_freq();
+		    boot_max_rate > scale_rate)
+			scale_rate = boot_max_rate;
 		dev_dbg(dev, "scale_rate=%lu\n", scale_rate);
 		ret = rockchip_adjust_opp_table(dev, scale_rate);
 		if (ret)
