@@ -237,7 +237,7 @@
 
 	wireless-wlan {
 		compatible = "wlan-platdata";
-		rockchip,grf = <47>;
+		rockchip,grf = <&grf>;
 		wifi_chip_type = "esp8089";
 		sdio_vref = <3300>;
 		WIFI,poweren_gpio = <&gpio3 RK_PB6 GPIO_ACTIVE_LOW>;
