@@ -279,7 +279,6 @@
 		/* pwm1 backlight */
 		backlight = <&backlight>;
 		/* RK817 LDO7 */
-		backlight-supply = <&vcc_backlight>;
 		/* RK817 LDO8 */
 		power-supply = <&vcc_lcd>;
 		/* Rev 0.2 LCD reset gpio GPIO3.C0 */
