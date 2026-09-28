@@ -18,6 +18,7 @@
 #include <linux/delay.h>
 #include <linux/extcon.h>
 #include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/iio/consumer.h>
 #include <linux/iio/iio.h>
 #include <linux/irq.h>
@@ -278,6 +279,7 @@ struct charger_platform_data {
 	u32 dc_det_level;
 	int dc_det_pin;
 	bool support_dc_det;
+	struct gpio_desc *chg_led;
 	int virtual_power;
 	int sample_res;
 	int otg5v_suspend_enable;
@@ -571,6 +573,12 @@ static void rk817_charge_sys_can_sd_disable(struct rk817_charger *charge)
 	rk817_charge_field_write(charge, SYS_CAN_SD, DISABLE);
 }
 
+static void rk817_charge_set_chg_led(struct rk817_charger *charge, int on)
+{
+	if (charge->pdata->chg_led)
+		gpiod_set_value_cansleep(charge->pdata->chg_led, on);
+}
+
 static int rk817_charge_get_charge_status(struct rk817_charger *charge)
 {
 	int status;
@@ -580,21 +588,27 @@ static int rk817_charge_get_charge_status(struct rk817_charger *charge)
 	switch (status) {
 	case CHRG_OFF:
 		DBG("charge off...\n");
+		rk817_charge_set_chg_led(charge, 0);
 		break;
 	case DEAD_CHRG:
 		DBG("dead charge...\n");
+		rk817_charge_set_chg_led(charge, 0);
 		break;
 	case TRICKLE_CHRG:
 		DBG("trickle charge...\n");
+		rk817_charge_set_chg_led(charge, 1);
 		break;
 	case CC_OR_CV_CHRG:
 		DBG("CC or CV charge...\n");
+		rk817_charge_set_chg_led(charge, 1);
 		break;
 	case CHRG_TERM:
 		DBG("charge TERM...\n");
+		rk817_charge_set_chg_led(charge, 0);
 		break;
 	case USB_OVER_VOL:
 		DBG("USB over voltage...\n");
+		rk817_charge_set_chg_led(charge, 0);
 		break;
 	case BAT_TMP_ERR:
 		DBG("battery temperature error...\n");
@@ -802,6 +816,8 @@ static void rk817_charge_set_chrg_param(struct rk817_charger *charge,
 			charge->prop_status = POWER_SUPPLY_STATUS_DISCHARGING;
 			rk817_charge_set_input_current(charge, INPUT_450MA);
 		}
+		/* DC may still be charging */
+		rk817_charge_set_chg_led(charge, rk817_charge_online(charge));
 		power_supply_changed(charge->usb_psy);
 		power_supply_changed(charge->ac_psy);
 		break;
@@ -811,6 +827,7 @@ static void rk817_charge_set_chrg_param(struct rk817_charger *charge,
 		charge->prop_status = POWER_SUPPLY_STATUS_CHARGING;
 		if (charge->dc_in == 0)
 			rk817_charge_set_input_current(charge, INPUT_450MA);
+		rk817_charge_set_chg_led(charge, 1);
 		power_supply_changed(charge->usb_psy);
 		power_supply_changed(charge->ac_psy);
 		break;
@@ -825,6 +842,7 @@ static void rk817_charge_set_chrg_param(struct rk817_charger *charge,
 		else
 			rk817_charge_set_input_current(charge,
 						       INPUT_1500MA);
+		rk817_charge_set_chg_led(charge, 1);
 		power_supply_changed(charge->usb_psy);
 		power_supply_changed(charge->ac_psy);
 		break;
@@ -833,6 +851,7 @@ static void rk817_charge_set_chrg_param(struct rk817_charger *charge,
 		charge->prop_status = POWER_SUPPLY_STATUS_CHARGING;
 		rk817_charge_set_input_current(charge,
 					       charge->max_input_current);
+		rk817_charge_set_chg_led(charge, 1);
 		power_supply_changed(charge->usb_psy);
 		power_supply_changed(charge->ac_psy);
 		break;
@@ -847,12 +866,15 @@ static void rk817_charge_set_chrg_param(struct rk817_charger *charge,
 			rk817_charge_set_input_current(charge, INPUT_450MA);
 			charge->prop_status = POWER_SUPPLY_STATUS_CHARGING;
 		}
+		/* USB may still be charging */
+		rk817_charge_set_chg_led(charge, rk817_charge_online(charge));
 		power_supply_changed(charge->usb_psy);
 		power_supply_changed(charge->ac_psy);
 		break;
 	default:
 		charge->prop_status = POWER_SUPPLY_STATUS_DISCHARGING;
 		rk817_charge_set_input_current(charge, INPUT_450MA);
+		rk817_charge_set_chg_led(charge, 0);
 		break;
 	}
 
@@ -1456,6 +1478,23 @@ static int rk817_charge_parse_dt(struct rk817_charger *charge)
 		} else {
 			dev_err(dev, "invalid dc det gpio!\n");
 			return -EINVAL;
+		}
+	}
+
+	/* Optional charge LED, may share its GPIO with the gauge's bat-low LED */
+	if (of_find_property(np, "chg_led_gpio", NULL)) {
+		pdata->chg_led = devm_gpiod_get_from_of_node(dev, np,
+					"chg_led_gpio", 0,
+					GPIOD_ASIS | GPIOD_FLAGS_BIT_NONEXCLUSIVE,
+					"chg_led");
+		if (IS_ERR(pdata->chg_led)) {
+			ret = PTR_ERR(pdata->chg_led);
+			pdata->chg_led = NULL;
+			if (ret == -EPROBE_DEFER)
+				return ret;
+			dev_err(dev, "invalid chg led gpio: %d\n", ret);
+		} else {
+			gpiod_direction_output(pdata->chg_led, 0);
 		}
 	}
 
