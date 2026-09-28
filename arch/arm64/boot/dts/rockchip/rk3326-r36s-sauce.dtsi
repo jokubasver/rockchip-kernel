@@ -385,6 +385,50 @@
 	status = "okay";
 };
 
+/*
+ * vdd_logic has a 1.175 V floor here, as on the HG36 base. GPU OPPs below
+ * it are rejected by the regulator, so run every GPU OPP at the floor.
+ */
+&gpu_opp_table {
+	rockchip,max-volt = <1250000>;
+
+	opp-200000000 {
+		opp-microvolt = <1175000>;
+		opp-microvolt-L0 = <1175000>;
+		opp-microvolt-L1 = <1175000>;
+		opp-microvolt-L2 = <1175000>;
+		opp-microvolt-L3 = <1175000>;
+	};
+	opp-300000000 {
+		opp-microvolt = <1175000>;
+		opp-microvolt-L0 = <1175000>;
+		opp-microvolt-L1 = <1175000>;
+		opp-microvolt-L2 = <1175000>;
+		opp-microvolt-L3 = <1175000>;
+	};
+	opp-400000000 {
+		opp-microvolt = <1175000>;
+		opp-microvolt-L0 = <1175000>;
+		opp-microvolt-L1 = <1175000>;
+		opp-microvolt-L2 = <1175000>;
+		opp-microvolt-L3 = <1175000>;
+	};
+	opp-480000000 {
+		opp-microvolt = <1175000>;
+		opp-microvolt-L0 = <1175000>;
+		opp-microvolt-L1 = <1175000>;
+		opp-microvolt-L2 = <1175000>;
+		opp-microvolt-L3 = <1175000>;
+	};
+	opp-520000000 {
+		opp-microvolt = <1175000>;
+		opp-microvolt-L0 = <1175000>;
+		opp-microvolt-L1 = <1175000>;
+		opp-microvolt-L2 = <1175000>;
+		opp-microvolt-L3 = <1175000>;
+	};
+};
+
 &i2c0 {
 	status = "okay";
 	clock-frequency = <400000>;
