@@ -14,6 +14,7 @@
 #include "rk3326.dtsi"
 #include "rk3326-linux.dtsi"
 #include "rk3326-oc.dtsi"
+#include "rk3326-vdd-logic-1150.dtsi"
 
 / {
 	model = "Powkiddy RGBV10";

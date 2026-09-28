@@ -1,0 +1,104 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * DDR and GPU voltages for boards whose vdd_logic tops out at 1.15 V, as the
+ * ArkOS 4.4 tree ran them. Include after rk3326-oc.dtsi.
+ *
+ * The flat 1.175 V tables used with the HG36 base's 1.175 V vdd_logic floor
+ * exceed this regulator, which leaves no usable DDR OPP and drops the top GPU
+ * OPPs. 1.032 GHz DDR needs 1.2 V and is usable only with rk3326-oc-voltage.
+ */
+
+&dmc_opp_table {
+	rockchip,max-volt = <1150000>;
+
+	opp-194000000 {
+		opp-microvolt = <950000>;
+		opp-microvolt-L0 = <950000>;
+		opp-microvolt-L1 = <950000>;
+		opp-microvolt-L2 = <950000>;
+		opp-microvolt-L3 = <950000>;
+	};
+	opp-328000000 {
+		opp-microvolt = <950000>;
+		opp-microvolt-L0 = <950000>;
+		opp-microvolt-L1 = <950000>;
+		opp-microvolt-L2 = <950000>;
+		opp-microvolt-L3 = <950000>;
+	};
+	opp-450000000 {
+		opp-microvolt = <950000>;
+		opp-microvolt-L0 = <950000>;
+		opp-microvolt-L1 = <950000>;
+		opp-microvolt-L2 = <950000>;
+		opp-microvolt-L3 = <950000>;
+	};
+	opp-666000000 {
+		opp-microvolt = <1050000>;
+		opp-microvolt-L0 = <1050000>;
+		opp-microvolt-L1 = <1000000>;
+		opp-microvolt-L2 = <975000>;
+		opp-microvolt-L3 = <950000>;
+	};
+	opp-786000000 {
+		opp-microvolt = <1100000>;
+		opp-microvolt-L0 = <1100000>;
+		opp-microvolt-L1 = <1050000>;
+		opp-microvolt-L2 = <1025000>;
+		opp-microvolt-L3 = <1000000>;
+		status = "okay";
+	};
+	opp-924000000 {
+		opp-microvolt = <1150000>;
+		opp-microvolt-L0 = <1150000>;
+		opp-microvolt-L1 = <1150000>;
+		opp-microvolt-L2 = <1150000>;
+		opp-microvolt-L3 = <1150000>;
+	};
+};
+
+&gpu_opp_table {
+	rockchip,max-volt = <1175000>;
+
+	opp-200000000 {
+		opp-microvolt = <950000>;
+		opp-microvolt-L0 = <950000>;
+		opp-microvolt-L1 = <950000>;
+		opp-microvolt-L2 = <950000>;
+		opp-microvolt-L3 = <950000>;
+	};
+	opp-300000000 {
+		opp-microvolt = <975000>;
+		opp-microvolt-L0 = <975000>;
+		opp-microvolt-L1 = <950000>;
+		opp-microvolt-L2 = <950000>;
+		opp-microvolt-L3 = <950000>;
+	};
+	opp-400000000 {
+		opp-microvolt = <1050000>;
+		opp-microvolt-L0 = <1050000>;
+		opp-microvolt-L1 = <1025000>;
+		opp-microvolt-L2 = <975000>;
+		opp-microvolt-L3 = <950000>;
+	};
+	opp-480000000 {
+		opp-microvolt = <1125000>;
+		opp-microvolt-L0 = <1125000>;
+		opp-microvolt-L1 = <1100000>;
+		opp-microvolt-L2 = <1050000>;
+		opp-microvolt-L3 = <1000000>;
+	};
+	opp-520000000 {
+		opp-microvolt = <1150000>;
+		opp-microvolt-L0 = <1150000>;
+		opp-microvolt-L1 = <1150000>;
+		opp-microvolt-L2 = <1100000>;
+		opp-microvolt-L3 = <1050000>;
+	};
+	opp-600000000 {
+		opp-microvolt = <1150000>;
+		opp-microvolt-L0 = <1150000>;
+		opp-microvolt-L1 = <1150000>;
+		opp-microvolt-L2 = <1150000>;
+		opp-microvolt-L3 = <1150000>;
+	};
+};

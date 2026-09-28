@@ -14,6 +14,7 @@
 #include "rk3326.dtsi"
 #include "rk3326-linux.dtsi"
 #include "rk3326-oc.dtsi"
+#include "rk3326-vdd-logic-1150.dtsi"
 
 / {
 	model = "Powkiddy RGB10MAX2";
@@ -422,49 +423,6 @@
 	center-supply = <&vdd_logic>;
 	status = "okay";
 };
-
-&dmc_opp_table {
-	rockchip,max-volt = <1250000>;
-
-	opp-194000000 {
-		opp-microvolt = <1175000>;
-		opp-microvolt-L0 = <1175000>;
-		opp-microvolt-L1 = <1175000>;
-		opp-microvolt-L2 = <1175000>;
-		opp-microvolt-L3 = <1175000>;
-	};
-	opp-328000000 {
-		opp-microvolt = <1175000>;
-		opp-microvolt-L0 = <1175000>;
-		opp-microvolt-L1 = <1175000>;
-		opp-microvolt-L2 = <1175000>;
-		opp-microvolt-L3 = <1175000>;
-	};
-	opp-450000000 {
-		opp-microvolt = <1175000>;
-		opp-microvolt-L0 = <1175000>;
-		opp-microvolt-L1 = <1175000>;
-		opp-microvolt-L2 = <1175000>;
-		opp-microvolt-L3 = <1175000>;
-	};
-	opp-666000000 {
-		opp-microvolt = <1175000>;
-		opp-microvolt-L0 = <1175000>;
-		opp-microvolt-L1 = <1175000>;
-		opp-microvolt-L2 = <1175000>;
-		opp-microvolt-L3 = <1175000>;
-	};
-	opp-786000000 {
-		opp-microvolt = <1175000>;
-		opp-microvolt-L0 = <1175000>;
-		opp-microvolt-L1 = <1175000>;
-		opp-microvolt-L2 = <1175000>;
-		opp-microvolt-L3 = <1175000>;
-		status = "okay";
-	};
-};
-
-
 
 &emmc {
 	status = "disabled";
