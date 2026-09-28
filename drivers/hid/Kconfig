@@ -755,6 +755,17 @@ config HID_ORTEK
 	   - Ortek WKB-2000
 	   - Skycable wireless presenter
 
+config HID_OSHPB
+	tristate "OpenSimHardware OSH PB Controller (odroidgo3-joypad compatible)"
+	depends on USB_HID
+	select INPUT_FF_MEMLESS
+	help
+	  Say Y here if you have an OpenSimHardware OSH PB Controller
+	  (USB VID:1209 PID:3100), the built-in controls of the RG351P/V.
+	  The driver remaps its reports to the odroidgo3-joypad layout
+	  ("GO-Super Gamepad"), tuned from the odroidgo3-hid-joypad DT node,
+	  and exposes swap_ab/swap_xy sysfs attributes.
+
 config HID_PANTHERLORD
 	tristate "Pantherlord/GreenAsia game controller"
 	depends on HID
