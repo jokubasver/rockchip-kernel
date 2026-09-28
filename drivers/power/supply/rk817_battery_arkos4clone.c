@@ -25,6 +25,7 @@
 #include <linux/power_supply.h>
 #include <linux/power/rk_usbbc.h>
 #include <linux/regmap.h>
+#include <linux/reboot.h>
 #include <linux/rk_keys.h>
 #include <linux/rtc.h>
 #include <linux/timer.h>
@@ -52,11 +53,20 @@
 #define HYBRID_FULL_CURR_THRESH_MA	150	/* current below this = near full */
 #define HYBRID_FULL_VOLT_THRESH_MV	4050	/* voltage must be above this */
 #define HYBRID_FULL_TIMEOUT_SEC		(20 * 60)	/* 20 min timeout at 99% */
+/* Net discharge while plugged in: the charger is losing to the load */
+#define HYBRID_NET_DISCHARGE_MA		50
+/* Under load below power_off_thresd: shut down after this long, or 50 mV lower */
+#define HYBRID_LOWPWR_DELAY_SEC		60
+#define HYBRID_LOWPWR_MARGIN_MV		50
 
 static int dbg_enable;
 struct rk817_battery_device;  /* 先前置声明结构体标签 */
 
 module_param_named(dbg_level, dbg_enable, int, 0644);
+
+static bool lowpwr_poweroff = true;
+module_param(lowpwr_poweroff, bool, 0644);
+MODULE_PARM_DESC(lowpwr_poweroff, "Power off cleanly below power_off_thresd under load");
 
 #define DBG(args...) \
 	do { \
@@ -561,6 +571,8 @@ struct rk817_battery_device {
 	int64_t				hybrid_last_loop_sec;	/* last loop boottime */
 	bool				hybrid_first_run;	/* first iteration flag */
 	int64_t				hybrid_99_start_sec;	/* time when SOC first hit 99% */
+	int64_t				lowpwr_start_sec;	/* first loop under load below power_off_thresd */
+	bool				lowpwr_poweroff_sent;
 
 	/* Per-device state (formerly static locals) */
 	u32				save_cap_old;		/* for rk817_bat_save_cap */
@@ -1151,11 +1163,14 @@ static void rk817_hybrid_calculate(struct rk817_battery_device *battery)
 	if (battery->hybrid_internal_soc < 99)
 		battery->hybrid_99_start_sec = 0;
 
-	/* Step 8: Step-limit for display */
+	/*
+	 * Step 8: Step-limit for display. A weak charger can lose to the load;
+	 * the display must then be able to fall.
+	 */
 	battery->hybrid_visible_soc = rk817_hybrid_step_limit(
 		battery->hybrid_visible_soc,
 		battery->hybrid_internal_soc,
-		charging);
+		charging && battery->current_avg > -HYBRID_NET_DISCHARGE_MA);
 
 	/* Step 9: Sync to existing dsoc for power supply reporting */
 	battery->dsoc = battery->hybrid_visible_soc * 1000;
@@ -1882,7 +1897,7 @@ static int rk817_bat_get_charge_status(struct rk817_battery_device *battery)
 		 battery->voltage_avg, battery->current_avg);
 
 	if (status == CC_OR_CV_CHRG) {
-		if (battery->rsoc >= 100) {
+		if (battery->rsoc >= MAX_PERCENTAGE) {
 			DBG("charge to finish\n");
 			status = CHARGE_FINISH;
 		}
@@ -3060,6 +3075,39 @@ static void rk817_bat_output_info(struct rk817_battery_device *battery)
 	}
 }
 
+/*
+ * Coulomb drift can leave the display well above 0% on a cell that is about to
+ * brown out. As the 4.4 original gauge did: after a minute under load below
+ * power_off_thresd, or at once 50 mV lower, report 0% and power off cleanly.
+ */
+static void rk817_hybrid_lowpwr_check(struct rk817_battery_device *battery)
+{
+	int thresd = battery->pdata->pwroff_vol;
+	int64_t now = rk817_hybrid_boottime_sec();
+
+	if (battery->current_avg >= 0 || battery->voltage_avg <= 0 ||
+	    battery->voltage_avg >= thresd) {
+		battery->lowpwr_start_sec = 0;
+		return;
+	}
+	if (!battery->lowpwr_start_sec)
+		battery->lowpwr_start_sec = now;
+	if (now - battery->lowpwr_start_sec < HYBRID_LOWPWR_DELAY_SEC &&
+	    battery->voltage_avg > thresd - HYBRID_LOWPWR_MARGIN_MV)
+		return;
+
+	battery->hybrid_internal_soc = 0;
+	battery->hybrid_visible_soc = 0;
+	battery->dsoc = 0;
+	if (!lowpwr_poweroff || battery->lowpwr_poweroff_sent)
+		return;
+
+	battery->lowpwr_poweroff_sent = true;
+	BAT_INFO("battery %d mV under load, below %d mV: power off\n",
+		 battery->voltage_avg, thresd);
+	orderly_poweroff(false);
+}
+
 static void rk817_battery_work(struct work_struct *work)
 {
 	struct rk817_battery_device *battery =
@@ -3070,6 +3118,7 @@ static void rk817_battery_work(struct work_struct *work)
 	rk817_bat_update_fg_info(battery);
 
 	rk817_hybrid_calculate(battery);
+	rk817_hybrid_lowpwr_check(battery);
 
 	rk817_bat_update_fcc(battery);
 	rk817_bat_power_supply_changed(battery);
