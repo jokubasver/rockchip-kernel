@@ -15,12 +15,19 @@
 #include <linux/of_platform.h>
 #include <linux/leds.h>
 #include <linux/err.h>
+#include <linux/power_supply.h>
 #include <linux/pwm.h>
 #include <linux/slab.h>
+#include <linux/workqueue.h>
+
+#define LED_PWM_BATTERY_DELAY_MS	1000
+#define LED_PWM_BATTERY_POLL_MS		5000
 
 struct led_pwm {
 	const char	*name;
 	u8		active_low;
+	bool		default_on;
+	bool		battery_scale;
 	unsigned int	max_brightness;
 };
 
@@ -29,6 +36,9 @@ struct led_pwm_data {
 	struct pwm_device	*pwm;
 	struct pwm_state	pwmstate;
 	unsigned int		active_low;
+	bool			battery_scale;
+	struct power_supply	*battery;
+	struct delayed_work	battery_work;
 };
 
 struct led_pwm_priv {
@@ -55,6 +65,48 @@ static int led_pwm_set(struct led_classdev *led_cdev,
 	return pwm_apply_state(led_dat->pwm, &led_dat->pwmstate);
 }
 
+/* battery-scale: 51-100% full, 30-50% dim, 0-29% off */
+static void led_pwm_battery_work(struct work_struct *work)
+{
+	struct led_pwm_data *led_dat = container_of(to_delayed_work(work),
+						    struct led_pwm_data,
+						    battery_work);
+	union power_supply_propval val;
+	enum led_brightness brightness;
+
+	if (!IS_ENABLED(CONFIG_POWER_SUPPLY))
+		return;
+
+	if (!led_dat->battery)
+		led_dat->battery = power_supply_get_by_name("battery");
+
+	if (led_dat->battery &&
+	    !power_supply_get_property(led_dat->battery,
+				       POWER_SUPPLY_PROP_CAPACITY, &val)) {
+		if (val.intval >= 51)
+			brightness = LED_FULL;
+		else if (val.intval >= 30)
+			brightness = 140;
+		else
+			brightness = LED_OFF;
+
+		led_set_brightness_sync(&led_dat->cdev, brightness);
+	}
+
+	queue_delayed_work(system_freezable_wq, &led_dat->battery_work,
+			   msecs_to_jiffies(LED_PWM_BATTERY_POLL_MS));
+}
+
+static void led_pwm_battery_release(void *data)
+{
+	struct led_pwm_data *led_dat = data;
+
+	cancel_delayed_work_sync(&led_dat->battery_work);
+	if (IS_ENABLED(CONFIG_POWER_SUPPLY) && led_dat->battery)
+		power_supply_put(led_dat->battery);
+	led_dat->battery = NULL;
+}
+
 __attribute__((nonnull))
 static int led_pwm_add(struct device *dev, struct led_pwm_priv *priv,
 		       struct led_pwm *led, struct fwnode_handle *fwnode)
@@ -65,8 +117,11 @@ static int led_pwm_add(struct device *dev, struct led_pwm_priv *priv,
 
 	led_data->active_low = led->active_low;
 	led_data->cdev.name = led->name;
-	led_data->cdev.brightness = LED_OFF;
 	led_data->cdev.max_brightness = led->max_brightness;
+	if (led->default_on)
+		led_data->cdev.brightness = led->max_brightness ?: LED_FULL;
+	else
+		led_data->cdev.brightness = LED_OFF;
 	led_data->cdev.flags = LED_CORE_SUSPENDRESUME;
 
 	led_data->pwm = devm_fwnode_pwm_get(dev, fwnode, NULL);
@@ -93,6 +148,20 @@ static int led_pwm_add(struct device *dev, struct led_pwm_priv *priv,
 		return ret;
 	}
 
+	if (led->battery_scale) {
+		INIT_DELAYED_WORK(&led_data->battery_work,
+				  led_pwm_battery_work);
+		ret = devm_add_action_or_reset(dev, led_pwm_battery_release,
+					       led_data);
+		if (ret)
+			return ret;
+
+		led_data->battery_scale = true;
+		queue_delayed_work(system_freezable_wq,
+				   &led_data->battery_work,
+				   msecs_to_jiffies(LED_PWM_BATTERY_DELAY_MS));
+	}
+
 	priv->num_leds++;
 	return 0;
 }
@@ -101,6 +170,7 @@ static int led_pwm_create_fwnode(struct device *dev, struct led_pwm_priv *priv)
 {
 	struct fwnode_handle *fwnode;
 	struct led_pwm led;
+	const char *state;
 	int ret = 0;
 
 	memset(&led, 0, sizeof(led));
@@ -119,6 +189,13 @@ static int led_pwm_create_fwnode(struct device *dev, struct led_pwm_priv *priv)
 							   "active-low");
 		fwnode_property_read_u32(fwnode, "max-brightness",
 					 &led.max_brightness);
+
+		led.default_on = !fwnode_property_read_string(fwnode,
+							       "default-state",
+							       &state) &&
+				 !strcmp(state, "on");
+		led.battery_scale = fwnode_property_read_bool(fwnode,
+							      "battery-scale");
 
 		ret = led_pwm_add(dev, priv, &led, fwnode);
 		if (ret) {
@@ -156,6 +233,16 @@ static int led_pwm_probe(struct platform_device *pdev)
 	return 0;
 }
 
+static void led_pwm_shutdown(struct platform_device *pdev)
+{
+	struct led_pwm_priv *priv = platform_get_drvdata(pdev);
+	int i;
+
+	for (i = 0; i < priv->num_leds; i++)
+		if (priv->leds[i].battery_scale)
+			cancel_delayed_work_sync(&priv->leds[i].battery_work);
+}
+
 static const struct of_device_id of_pwm_leds_match[] = {
 	{ .compatible = "pwm-leds", },
 	{},
@@ -164,6 +251,7 @@ MODULE_DEVICE_TABLE(of, of_pwm_leds_match);
 
 static struct platform_driver led_pwm_driver = {
 	.probe		= led_pwm_probe,
+	.shutdown	= led_pwm_shutdown,
 	.driver		= {
 		.name	= "leds_pwm",
 		.of_match_table = of_pwm_leds_match,
