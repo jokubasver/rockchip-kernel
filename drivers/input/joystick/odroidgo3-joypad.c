@@ -224,6 +224,8 @@ static inline void rumble_gpio_set(struct joypad *joypad, bool on)
 
 static int joypad_vibrator_start(struct joypad *joypad)
 {
+	if (!joypad->has_rumble)
+		return 0;
 	if (gpio_is_valid(joypad->rumble_gpio)) {
 		rumble_gpio_set(joypad, true);
 		return 0;
@@ -233,6 +235,8 @@ static int joypad_vibrator_start(struct joypad *joypad)
 
 static void joypad_vibrator_stop(struct joypad *joypad)
 {
+	if (!joypad->has_rumble)
+		return;
 	if (gpio_is_valid(joypad->rumble_gpio)) {
 		rumble_gpio_set(joypad, false);
 		return;
@@ -2012,6 +2016,8 @@ static int joypad_rumble_setup(struct device *dev, struct joypad *joypad)
 	joypad->pwm = devm_pwm_get(dev, "enable");
 	if (IS_ERR(joypad->pwm))
 	{
+		/* Boards without rumble must not keep the ERR_PTR. */
+		joypad->pwm = NULL;
 		dev_err(dev, "rumble get error\n");
 		return -EINVAL;
 	}
@@ -2021,6 +2027,7 @@ static int joypad_rumble_setup(struct device *dev, struct joypad *joypad)
 	state.enabled = false;
 	err = pwm_apply_state(joypad->pwm, &state);
 	if (err) {
+		joypad->pwm = NULL;
 		dev_err(dev, "failed to apply initial PWM state: %d",
 			err);
 		return err;
