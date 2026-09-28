@@ -25,6 +25,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/power_supply.h>
 #include <linux/regmap.h>
+#include <linux/regulator/consumer.h>
 #include <linux/reset.h>
 #include <linux/rockchip/cpu.h>
 #include <linux/mfd/syscon.h>
@@ -252,6 +253,7 @@ struct rockchip_usb2phy_cfg {
  * @bypass_uart_en: usb bypass uart enable, passed from DT.
  * @host_disconnect: usb host disconnect status.
  * @dis_u2_susphy: disable usb2 phy suspend.
+ * @ext_enabled: ext_supply is enabled by this driver.
  * @bvalid_irq: IRQ number assigned for vbus valid rise detection.
  * @ls_irq: IRQ number assigned for linestate detection.
  * @id_irq: IRQ number assigned for id fall or rise detection.
@@ -264,6 +266,9 @@ struct rockchip_usb2phy_cfg {
  * @chg_work: charge detect kthread work.
  * @chg_worker: charge detect kthread worker.
  * @vbus: vbus regulator supply on few rockchip boards.
+ * @switch_gpio: optional USB data switch, logical 0 routes the otg port
+ *		 to an internal device, 1 to the external connector.
+ * @ext_supply: optional power supply of the internal USB device.
  * @sw: orientation switch, communicate with TCPM (Type-C Port Manager).
  * @port_cfg: port register configuration, assigned by driver data.
  * @event_nb: hold event notification callback.
@@ -286,6 +291,7 @@ struct rockchip_usb2phy_port {
 	bool		bypass_uart_en;
 	bool		host_disconnect;
 	bool		dis_u2_susphy;
+	bool		ext_enabled;
 	int		bvalid_irq;
 	int		ls_irq;
 	int             id_irq;
@@ -297,6 +303,8 @@ struct rockchip_usb2phy_port {
 	struct		kthread_work chg_work;
 	struct		kthread_worker *chg_worker;
 	struct		regulator *vbus;
+	struct gpio_desc	*switch_gpio;
+	struct regulator	*ext_supply;
 	struct		typec_switch *sw;
 	const struct	rockchip_usb2phy_port_cfg *port_cfg;
 	struct notifier_block	event_nb;
@@ -1209,6 +1217,138 @@ static struct attribute_group usb2_phy_attr_group = {
 	.attrs = usb2_phy_attrs,
 };
 
+static struct rockchip_usb2phy_port *
+rockchip_usb2phy_otg_port(struct rockchip_usb2phy *rphy)
+{
+	unsigned int index;
+
+	for (index = 0; index < rphy->phy_cfg->num_ports; index++) {
+		if (rphy->ports[index].phy &&
+		    rphy->ports[index].port_id == USB2PHY_PORT_OTG)
+			return &rphy->ports[index];
+	}
+
+	return NULL;
+}
+
+/* The otg port is routed to the internal device, which needs host mode */
+static bool
+rockchip_usb2phy_switch_internal(struct rockchip_usb2phy_port *rport)
+{
+	return rport->switch_gpio &&
+	       gpiod_get_value_cansleep(rport->switch_gpio) == 0;
+}
+
+/* USB data switch: 0 - internal device, 1 - external connector */
+static ssize_t usb_switch_gpio_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	struct rockchip_usb2phy *rphy = dev_get_drvdata(dev);
+	struct rockchip_usb2phy_port *rport = rockchip_usb2phy_otg_port(rphy);
+
+	return sysfs_emit(buf, "%d\n",
+			  gpiod_get_value_cansleep(rport->switch_gpio));
+}
+
+static ssize_t usb_switch_gpio_store(struct device *dev,
+				     struct device_attribute *attr,
+				     const char *buf, size_t count)
+{
+	struct rockchip_usb2phy *rphy = dev_get_drvdata(dev);
+	struct rockchip_usb2phy_port *rport = rockchip_usb2phy_otg_port(rphy);
+	unsigned int val;
+	int ret;
+
+	ret = kstrtouint(buf, 10, &val);
+	if (ret)
+		return ret;
+
+	gpiod_set_value_cansleep(rport->switch_gpio, !!val);
+	dev_info(dev, "switch_gpio set to %d\n", !!val);
+
+	/* Let the otg state machine follow the new routing */
+	if (rport->otg_sm_work.work.func)
+		schedule_delayed_work(&rport->otg_sm_work, OTG_SCHEDULE_DELAY);
+
+	return count;
+}
+static DEVICE_ATTR_RW(usb_switch_gpio);
+
+/* Power supply of the internal device: 0 - off, 1 - on */
+static ssize_t usb_switch_ext_show(struct device *dev,
+				   struct device_attribute *attr, char *buf)
+{
+	struct rockchip_usb2phy *rphy = dev_get_drvdata(dev);
+	struct rockchip_usb2phy_port *rport = rockchip_usb2phy_otg_port(rphy);
+
+	return sysfs_emit(buf, "%d\n", regulator_is_enabled(rport->ext_supply));
+}
+
+static ssize_t usb_switch_ext_store(struct device *dev,
+				    struct device_attribute *attr,
+				    const char *buf, size_t count)
+{
+	struct rockchip_usb2phy *rphy = dev_get_drvdata(dev);
+	struct rockchip_usb2phy_port *rport = rockchip_usb2phy_otg_port(rphy);
+	unsigned int val;
+	int ret;
+
+	ret = kstrtouint(buf, 10, &val);
+	if (ret)
+		return ret;
+
+	mutex_lock(&rport->mutex);
+	if (!!val != rport->ext_enabled) {
+		if (val)
+			ret = regulator_enable(rport->ext_supply);
+		else
+			ret = regulator_disable(rport->ext_supply);
+		if (!ret)
+			rport->ext_enabled = !!val;
+	}
+	mutex_unlock(&rport->mutex);
+
+	if (ret) {
+		dev_err(dev, "failed to %s ext-supply: %d\n",
+			val ? "enable" : "disable", ret);
+		return ret;
+	}
+
+	dev_info(dev, "ext-supply %s\n", val ? "enabled" : "disabled");
+
+	return count;
+}
+static DEVICE_ATTR_RW(usb_switch_ext);
+
+static struct attribute *usb2_phy_switch_attrs[] = {
+	&dev_attr_usb_switch_gpio.attr,
+	&dev_attr_usb_switch_ext.attr,
+	NULL,
+};
+
+static umode_t usb2_phy_switch_attr_is_visible(struct kobject *kobj,
+					       struct attribute *attr, int n)
+{
+	struct rockchip_usb2phy *rphy = dev_get_drvdata(kobj_to_dev(kobj));
+	struct rockchip_usb2phy_port *rport = rockchip_usb2phy_otg_port(rphy);
+
+	if (!rport)
+		return 0;
+
+	if (attr == &dev_attr_usb_switch_gpio.attr && !rport->switch_gpio)
+		return 0;
+
+	if (attr == &dev_attr_usb_switch_ext.attr && !rport->ext_supply)
+		return 0;
+
+	return attr->mode;
+}
+
+static const struct attribute_group usb2_phy_switch_attr_group = {
+	.attrs = usb2_phy_switch_attrs,
+	.is_visible = usb2_phy_switch_attr_is_visible,
+};
+
 static void rockchip_usb2phy_otg_sm_work(struct work_struct *work)
 {
 	struct rockchip_usb2phy_port *rport =
@@ -1249,7 +1389,8 @@ static void rockchip_usb2phy_otg_sm_work(struct work_struct *work)
 		fallthrough;
 	case OTG_STATE_B_IDLE:
 		if (extcon_get_state(rphy->edev, EXTCON_USB_HOST) > 0 ||
-		    extcon_get_state(rphy->edev, EXTCON_USB_VBUS_EN) > 0) {
+		    extcon_get_state(rphy->edev, EXTCON_USB_VBUS_EN) > 0 ||
+		    rockchip_usb2phy_switch_internal(rport)) {
 			dev_dbg(&rport->phy->dev, "usb otg host connect\n");
 			rport->state = OTG_STATE_A_HOST;
 			rphy->chg_state = USB_CHG_STATE_UNDEFINED;
@@ -1338,7 +1479,8 @@ static void rockchip_usb2phy_otg_sm_work(struct work_struct *work)
 		}
 		break;
 	case OTG_STATE_A_HOST:
-		if (extcon_get_state(rphy->edev, EXTCON_USB_HOST) == 0) {
+		if (extcon_get_state(rphy->edev, EXTCON_USB_HOST) == 0 &&
+		    !rockchip_usb2phy_switch_internal(rport)) {
 			dev_dbg(&rport->phy->dev, "usb otg host disconnect\n");
 			rport->state = OTG_STATE_B_IDLE;
 			sch_work = true;
@@ -2139,6 +2281,58 @@ static void rockchip_otg_wake_lock_destroy(void *data)
 	wake_lock_destroy((struct wake_lock *)(data));
 }
 
+static void rockchip_usb2phy_ext_supply_disable(void *data)
+{
+	struct rockchip_usb2phy_port *rport = data;
+
+	if (rport->ext_enabled)
+		regulator_disable(rport->ext_supply);
+}
+
+static int rockchip_usb2phy_switch_init(struct rockchip_usb2phy *rphy,
+					struct rockchip_usb2phy_port *rport)
+{
+	struct device *dev = &rport->phy->dev;
+	int ret;
+
+	/* Optional supply of the internal USB device, enabled by default */
+	rport->ext_supply = devm_regulator_get_optional(dev, "ext");
+	if (IS_ERR(rport->ext_supply)) {
+		ret = PTR_ERR(rport->ext_supply);
+		if (ret == -EPROBE_DEFER)
+			return ret;
+
+		if (ret != -ENODEV)
+			dev_warn(dev, "Failed to get ext supply: %d\n", ret);
+		rport->ext_supply = NULL;
+	}
+
+	/* Optional USB data switch, route to the internal device by default */
+	rport->switch_gpio = devm_gpiod_get_optional(dev, "switch",
+						     GPIOD_OUT_LOW);
+	if (IS_ERR(rport->switch_gpio)) {
+		ret = PTR_ERR(rport->switch_gpio);
+		if (ret == -EPROBE_DEFER)
+			return ret;
+
+		dev_warn(dev, "Failed to get switch gpio: %d\n", ret);
+		rport->switch_gpio = NULL;
+	}
+
+	if (!rport->ext_supply)
+		return 0;
+
+	ret = regulator_enable(rport->ext_supply);
+	if (ret)
+		dev_warn(dev, "Failed to enable ext supply: %d\n", ret);
+	else
+		rport->ext_enabled = true;
+
+	return devm_add_action_or_reset(rphy->dev,
+					rockchip_usb2phy_ext_supply_disable,
+					rport);
+}
+
 static int rockchip_usb2phy_otg_port_init(struct rockchip_usb2phy *rphy,
 					  struct rockchip_usb2phy_port *rport,
 					  struct device_node *child_np)
@@ -2199,6 +2393,10 @@ static int rockchip_usb2phy_otg_port_init(struct rockchip_usb2phy *rphy,
 			dev_warn(&rport->phy->dev, "No vbus specified for otg port\n");
 		rport->vbus = NULL;
 	}
+
+	ret = rockchip_usb2phy_switch_init(rphy, rport);
+	if (ret)
+		return ret;
 
 	rport->mode = of_usb_get_dr_mode_by_phy(child_np, -1);
 	iddig = property_enabled(rphy->grf, &rport->port_cfg->utmi_iddig);
@@ -2495,6 +2693,12 @@ next_child:
 		}
 	}
 
+	ret = devm_device_add_group(dev, &usb2_phy_switch_attr_group);
+	if (ret) {
+		dev_err(dev, "Cannot create usb switch sysfs group: %d\n", ret);
+		goto put_child;
+	}
+
 	if (of_property_read_bool(np, "wakeup-source"))
 		device_init_wakeup(rphy->dev, true);
 	else
@@ -2526,6 +2730,9 @@ static int rockchip_usb2phy_remove(struct platform_device *pdev)
 	struct rockchip_usb2phy *rphy = platform_get_drvdata(pdev);
 	struct rockchip_usb2phy_port *rport;
 	unsigned int index;
+
+	/* Stop usb_switch_gpio writes from queueing otg_sm_work */
+	devm_device_remove_group(&pdev->dev, &usb2_phy_switch_attr_group);
 
 	for (index = 0; index < rphy->phy_cfg->num_ports; index++) {
 		rport = &rphy->ports[index];
