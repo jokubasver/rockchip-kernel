@@ -336,6 +336,7 @@ struct rk817_charger {
 	u8 plugout_trigger;
 	int plugin_irq;
 	int plugout_irq;
+	bool plug_irqs_masked;
 };
 
 static enum power_supply_property rk817_ac_props[] = {
@@ -882,6 +883,22 @@ static void rk817_charge_set_chrg_param(struct rk817_charger *charge,
 		charge->prop_status = POWER_SUPPLY_STATUS_FULL;
 }
 
+/* Plug detection is masked while the OTG boost drives VBUS */
+static void rk817_charge_mask_plug_irqs(struct rk817_charger *charge, bool mask)
+{
+	if (charge->plug_irqs_masked == mask || charge->plugin_irq <= 0)
+		return;
+
+	if (mask) {
+		disable_irq(charge->plugin_irq);
+		disable_irq(charge->plugout_irq);
+	} else {
+		enable_irq(charge->plugin_irq);
+		enable_irq(charge->plugout_irq);
+	}
+	charge->plug_irqs_masked = mask;
+}
+
 static void rk817_charge_set_otg_state(struct rk817_charger *charge, int state)
 {
 	switch (state) {
@@ -897,8 +914,7 @@ static void rk817_charge_set_otg_state(struct rk817_charger *charge, int state)
 					return;
 				}
 			}
-			disable_irq(charge->plugin_irq);
-			disable_irq(charge->plugout_irq);
+			rk817_charge_mask_plug_irqs(charge, true);
 			DBG("enable otg5v\n");
 		}
 		break;
@@ -908,15 +924,16 @@ static void rk817_charge_set_otg_state(struct rk817_charger *charge, int state)
 			DBG("otg5v is off yet, ignore..\n");
 		} else {
 
-			if (rk817_charge_get_otg_state(charge)) {
-				rk817_charge_otg_disable(charge);
-				if (rk817_charge_get_otg_state(charge)) {
-					DBG("disable otg5v failed\n");
-					return;
-				}
+			/*
+			 * A dummy or shared supply can stay enabled; only a
+			 * failure to drop our own enable keeps plug irqs masked.
+			 */
+			rk817_charge_otg_disable(charge);
+			if (charge->otg5v_enabled) {
+				DBG("disable otg5v failed\n");
+				return;
 			}
-			enable_irq(charge->plugin_irq);
-			enable_irq(charge->plugout_irq);
+			rk817_charge_mask_plug_irqs(charge, false);
 			DBG("disable otg5v\n");
 		}
 		break;
