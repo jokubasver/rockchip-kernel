@@ -84,6 +84,10 @@ static bool drift_correct;
 module_param(drift_correct, bool, 0644);
 MODULE_PARM_DESC(drift_correct, "Pull the coulomb counter down toward the ocv_table SOC at rest");
 
+static bool drift_log;
+module_param(drift_log, bool, 0644);
+MODULE_PARM_DESC(drift_log, "Log the rest samples drift_correct would use, without correcting");
+
 #define DBG(args...) \
 	do { \
 		if (dbg_enable) { \
@@ -970,7 +974,8 @@ static void rk817_hybrid_drift_reset(struct rk817_battery_device *battery)
  * rested cell, so the counter is only pulled down, and only when it is more
  * than HYBRID_DRIFT_DEADBAND % above the table: 1 % per HYBRID_DRIFT_STEP_SEC
  * until the gap is gone. The display keeps its step limit and cannot rise
- * while discharging, so it never jumps.
+ * while discharging, so it never jumps. drift_log=1 logs the samples and the
+ * correction without applying it.
  */
 static void rk817_hybrid_drift_correct(struct rk817_battery_device *battery,
 				       int ema_mv, int curve_soc)
@@ -1005,7 +1010,8 @@ static void rk817_hybrid_drift_correct(struct rk817_battery_device *battery,
 			 battery->hybrid_drift_pending);
 	}
 
-	if (battery->hybrid_drift_pending <= 0 || coulomb <= 0 ||
+	if (!drift_correct || battery->hybrid_drift_pending <= 0 ||
+	    coulomb <= 0 ||
 	    now - battery->hybrid_drift_step_sec < HYBRID_DRIFT_STEP_SEC)
 		return;
 
@@ -1163,7 +1169,7 @@ static void rk817_hybrid_calculate(struct rk817_battery_device *battery)
 	} else {
 		/* Discharging: coulomb counter, rest-voltage drift correction */
 		battery->hybrid_internal_soc = raw_soc_from_coulomb;
-		if (drift_correct)
+		if (drift_correct || drift_log)
 			rk817_hybrid_drift_correct(battery, ema_mv, soc);
 
 		/*
@@ -2293,12 +2299,12 @@ static void rk817_bat_not_first_pwron(struct rk817_battery_device *battery)
 	if (battery->nac < 0)
 		battery->nac = 0;
 
-	DBG("dsoc=%d cap=%d v=%d ov=%d rv=%d min=%d psoc=%d pcap=%d\n",
-	    battery->dsoc, battery->nac, rk817_bat_get_battery_voltage(battery),
-	    rk817_bat_get_ocv_voltage(battery),
-	    rk817_bat_get_relax_voltage(battery),
-	    battery->pwroff_min, rk817_bat_get_prev_dsoc(battery),
-	    rk817_bat_get_prev_cap(battery));
+	/* The PMIC counter shows whether charge taken while off was counted */
+	BAT_INFO("boot: saved %d%% %d mAh, counter %u mAh, off %u min, v=%d ov=%d rv=%d\n",
+		 pre_soc / 1000, pre_cap, rk817_bat_get_capacity_mah(battery),
+		 battery->pwroff_min, rk817_bat_get_battery_voltage(battery),
+		 rk817_bat_get_ocv_voltage(battery),
+		 rk817_bat_get_relax_voltage(battery));
 }
 
 static void rk817_bat_rsoc_init(struct rk817_battery_device *battery)
