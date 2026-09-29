@@ -3201,9 +3201,20 @@ static void rk817_hybrid_lowpwr_check(struct rk817_battery_device *battery)
 	if (!lowpwr_poweroff || battery->lowpwr_poweroff_sent)
 		return;
 
+	/*
+	 * The cell is empty whatever the counter says: let FCC learning see
+	 * the counter first, then zero it so the next boot does not restore
+	 * the drifted capacity. FCC learning is over for this boot, as its
+	 * raise rule would take the zeroed counter for a small FCC.
+	 */
+	rk817_bat_update_fcc(battery);
+	battery->fcc_update_done = true;
+	BAT_INFO("battery %d mV under load, below %d mV: power off, counter %d%% -> 0%%\n",
+		 battery->voltage_avg, thresd, battery->rsoc / 1000);
+	rk817_bat_init_coulomb_cap(battery, 0);
+	rk817_bat_save_data(battery);
+
 	battery->lowpwr_poweroff_sent = true;
-	BAT_INFO("battery %d mV under load, below %d mV: power off\n",
-		 battery->voltage_avg, thresd);
 	orderly_poweroff(false);
 }
 
