@@ -7,3 +7,4 @@ obj-$(CONFIG_RTL8710B)	+= rtl8188gu/
 obj-$(CONFIG_RTL8814AU)	+= rtl8814au/
 obj-$(CONFIG_RTL8852BU)	+= rtl8852bu/
 obj-$(CONFIG_AIC8800_WLAN_SUPPORT)	+= aic8800-usb/
+obj-$(CONFIG_RK915)	+= rk915/

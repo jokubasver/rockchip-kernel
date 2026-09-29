@@ -355,6 +355,10 @@ int mmc_of_parse(struct mmc_host *host)
 		host->caps2 |= MMC_CAP2_NO_MMC;
 	if (device_property_read_bool(dev, "no-prescan-powerup"))
 		host->caps2 |= MMC_CAP2_NO_PRESCAN_POWERUP;
+	if (device_property_read_bool(dev, "supports-rk915")) {
+		host->caps2 |= MMC_CAP2_WIFI_RK915;
+		dev_info(host->parent, "supports-rk915 property detected\n");
+	}
 
 	/* Must be after "non-removable" check */
 	if (device_property_read_u32(dev, "fixed-emmc-driver-type", &drv_type) == 0) {

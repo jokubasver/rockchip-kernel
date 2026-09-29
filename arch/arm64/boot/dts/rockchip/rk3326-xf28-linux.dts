@@ -259,12 +259,18 @@
 		regulator-max-microvolt = <5000000>;
 	};
 
+	/* RK915 power enable: the SDIO bus is scanned once, so power it first */
+	sdio_pwrseq: sdio-pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		reset-gpios = <&gpio0 RK_PA2 GPIO_ACTIVE_LOW>;
+		post-power-on-delay-ms = <200>;
+	};
+
 	wireless_wlan: wireless-wlan {
 		compatible = "wlan-platdata";
 		wifi_chip_type = "rk915";
 		keep_wifi_power_on;
 		WIFI,host_wake_irq = <&gpio0 RK_PA1 GPIO_ACTIVE_HIGH>;
-		WIFI,poweren_gpio = <&gpio0 RK_PA2 GPIO_ACTIVE_HIGH>;
 		status = "okay";
 	};
 
@@ -863,6 +869,7 @@
 	ignore-pm-notify;
 	non-removable;
 	keep-power-in-suspend;
+	mmc-pwrseq = <&sdio_pwrseq>;
 	status = "okay";
 };
 
