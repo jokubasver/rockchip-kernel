@@ -43,6 +43,7 @@ menu "ArkOS4Clone vendor Wi-Fi drivers"
 source "drivers/net/wireless/rockchip_wlan/rtl8188fu/Kconfig"
 source "drivers/net/wireless/rockchip_wlan/rtl8188gu/Kconfig"
 source "drivers/net/wireless/rockchip_wlan/rtl8814au/Kconfig"
+source "drivers/net/wireless/rockchip_wlan/rtl8852bu/Kconfig"
 endmenu
 
 endif # WL_ROCKCHIP
