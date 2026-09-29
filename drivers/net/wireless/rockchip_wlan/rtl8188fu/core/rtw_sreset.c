@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2017 Realtek Corporation.
@@ -184,6 +183,8 @@ void sreset_restore_network_station(_adapter *padapter)
 
 		rtw_hal_rcr_set_chk_bssid(padapter, MLME_STA_CONNECTING);
 		rtw_hal_set_hwreg(padapter, HW_VAR_MLME_JOIN, (u8 *)(&join_type));
+
+		rtw_btcoex_connect_notify(padapter, join_type);
 	}
 
 	Set_MSR(padapter, (pmlmeinfo->state & 0x3));
@@ -203,10 +204,14 @@ void sreset_restore_network_status(_adapter *padapter)
 	if (check_fwstate(mlmepriv, WIFI_STATION_STATE)) {
 		RTW_INFO(FUNC_ADPT_FMT" fwstate:0x%08x - WIFI_STATION_STATE\n", FUNC_ADPT_ARG(padapter), get_fwstate(mlmepriv));
 		sreset_restore_network_station(padapter);
-	} else if (MLME_IS_AP(padapter) || MLME_IS_MESH(padapter)) {
+	}
+#ifdef CONFIG_AP_MODE
+	else if (MLME_IS_AP(padapter) || MLME_IS_MESH(padapter)) {
 		RTW_INFO(FUNC_ADPT_FMT" %s\n", FUNC_ADPT_ARG(padapter), MLME_IS_AP(padapter) ? "AP" : "MESH");
 		rtw_ap_restore_network(padapter);
-	} else if (check_fwstate(mlmepriv, WIFI_ADHOC_STATE))
+	}
+#endif
+	else if (check_fwstate(mlmepriv, WIFI_ADHOC_STATE))
 		RTW_INFO(FUNC_ADPT_FMT" fwstate:0x%08x - WIFI_ADHOC_STATE\n", FUNC_ADPT_ARG(padapter), get_fwstate(mlmepriv));
 	else
 		RTW_INFO(FUNC_ADPT_FMT" fwstate:0x%08x - ???\n", FUNC_ADPT_ARG(padapter), get_fwstate(mlmepriv));
@@ -231,10 +236,10 @@ void sreset_stop_adapter(_adapter *padapter)
 	tasklet_kill(&pxmitpriv->xmit_tasklet);
 #endif
 
-	if (check_fwstate(pmlmepriv, _FW_UNDER_SURVEY))
+	if (check_fwstate(pmlmepriv, WIFI_UNDER_SURVEY))
 		rtw_scan_abort(padapter);
 
-	if (check_fwstate(pmlmepriv, _FW_UNDER_LINKING)) {
+	if (check_fwstate(pmlmepriv, WIFI_UNDER_LINKING)) {
 		rtw_set_to_roam(padapter, 0);
 		rtw_join_timeout_handler(padapter);
 	}
@@ -251,7 +256,7 @@ void sreset_start_adapter(_adapter *padapter)
 
 	RTW_INFO(FUNC_ADPT_FMT"\n", FUNC_ADPT_ARG(padapter));
 
-	if (check_fwstate(pmlmepriv, _FW_LINKED))
+	if (check_fwstate(pmlmepriv, WIFI_ASOC_STATE))
 		sreset_restore_network_status(padapter);
 
 	/* TODO: OS and HCI independent */
@@ -277,11 +282,18 @@ void sreset_reset(_adapter *padapter)
 	systime start = rtw_get_current_time();
 	struct dvobj_priv *psdpriv = padapter->dvobj;
 	struct debug_priv *pdbgpriv = &psdpriv->drv_dbg;
+	struct cmd_priv *pcmdpriv = &padapter->cmdpriv;
+	u8 ips_mode_bk;
+	u8 ips_changed = _FALSE;
 
 	RTW_INFO("%s\n", __FUNCTION__);
 
 	psrtpriv->Wifi_Error_Status = WIFI_STATUS_SUCCESS;
 
+	if (!rtw_is_hw_init_completed(padapter)){
+                RTW_INFO("hardware init not yet done\n");
+                return;
+        }
 
 #ifdef CONFIG_LPS
 	rtw_set_ps_mode(padapter, PS_MODE_ACTIVE, 0, 0, "SRESET");
@@ -293,9 +305,37 @@ void sreset_reset(_adapter *padapter)
 	pwrpriv->change_rfpwrstate = rf_off;
 
 	rtw_mi_sreset_adapter_hdl(padapter, _FALSE);/*sreset_stop_adapter*/
+
 #ifdef CONFIG_IPS
+	/* 1. If driver state is in ips, leaving ips at first */
+	if (pwrpriv->rf_pwrstate == rf_off || pwrpriv->bips_processing == _TRUE) {
+		if (ATOMIC_READ(&(pcmdpriv->cmdthd_running)) == _TRUE) {
+			if (rtw_ips_ctrl_wk_cmd(padapter, IPS_CTRL_LEAVE_SRESET, -1,
+			    RTW_CMDF_DIRECTLY) != _SUCCESS) {
+				RTW_ERR(FUNC_ADPT_FMT" Fail to leave IPS (current mode=%d).\n"
+					, FUNC_ADPT_ARG(padapter), pwrpriv->ips_mode_req);
+			}
+		}
+	}
+
+	/* 2. If current ips mode is NOT IPS_NORMAL, replacing it to IPS_NORMAL */
+	/*    in order to use card disable to execute sreset. */
+	if (pwrpriv->ips_mode_req != IPS_NORMAL) {
+		ips_mode_bk = pwrpriv->ips_mode_req;
+		pwrpriv->ips_mode_req = IPS_NORMAL;
+		ips_changed = _TRUE;
+	}
+
+	/* 3. Do card disable/enable to achieve sreset. */
 	_ips_enter(padapter);
 	_ips_leave(padapter);
+
+	/* 4. Restore the original ips mode setting. */
+	if (ips_changed)
+		pwrpriv->ips_mode_req = ips_mode_bk;
+#endif
+#if defined(CONFIG_AP_MODE) && defined(CONFIG_CONCURRENT_MODE)
+	rtw_mi_ap_info_restore(padapter);
 #endif
 	rtw_mi_sreset_adapter_hdl(padapter, _TRUE);/*sreset_start_adapter*/
 

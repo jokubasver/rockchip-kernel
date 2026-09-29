@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2017  Realtek Corporation.
@@ -191,9 +190,6 @@ odm_single_dual_antenna_detection(
 
 	/* @change to Antenna B */
 	if (dm->support_ic_type & ODM_RTL8723B) {
-#if 0
-		/* odm_set_bb_reg(dm, REG_DPDT_CONTROL, 0x3, 0x2); */
-#endif
 		odm_set_bb_reg(dm, REG_S0_S1_PATH_SWITCH, 0xfff, 0x280);
 		odm_set_bb_reg(dm, REG_AGC_TABLE_SELECT, BIT(31), 0x1);
 	}
@@ -671,6 +667,7 @@ void odm_single_dual_antenna_detection_psd(
 	u8 initial_gain = 0x36;
 	u8 tone_idx;
 	u8 tone_lenth_1 = 7, tone_lenth_2 = 4;
+	u8 tone_lenth_total = tone_lenth_1 + tone_lenth_2;
 	u16 tone_idx_1[7] = {88, 104, 120, 8, 24, 40, 56};
 	u16 tone_idx_2[4] = {8, 24, 40, 56};
 	u32 psd_report_main[11] = {0}, psd_report_aux[11] = {0};
@@ -787,7 +784,7 @@ void odm_single_dual_antenna_detection_psd(
 	/* @2 [ Calculate Result ] */
 
 	PHYDM_DBG(dm, DBG_ANT_DIV, "\nMain PSD Result: (ALL)\n");
-	for (tone_idx = 0; tone_idx < (tone_lenth_1 + tone_lenth_2); tone_idx++) {
+	for (tone_idx = 0; tone_idx < tone_lenth_total; tone_idx++) {
 		PHYDM_DBG(dm, DBG_ANT_DIV, "[Tone-%d]: %d,\n", (tone_idx + 1),
 			  psd_report_main[tone_idx]);
 		main_psd_result += psd_report_main[tone_idx];
@@ -801,7 +798,7 @@ void odm_single_dual_antenna_detection_psd(
 		  max_psd_report_main);
 
 	PHYDM_DBG(dm, DBG_ANT_DIV, "\nAux PSD Result: (ALL)\n");
-	for (tone_idx = 0; tone_idx < (tone_lenth_1 + tone_lenth_2); tone_idx++) {
+	for (tone_idx = 0; tone_idx < tone_lenth_total; tone_idx++) {
 		PHYDM_DBG(dm, DBG_ANT_DIV, "[Tone-%d]: %d,\n", (tone_idx + 1),
 			  psd_report_aux[tone_idx]);
 		aux_psd_result += psd_report_aux[tone_idx];

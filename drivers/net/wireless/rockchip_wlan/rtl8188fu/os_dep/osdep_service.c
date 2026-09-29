@@ -1,7 +1,6 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
- * Copyright(c) 2007 - 2017 Realtek Corporation.
+ * Copyright(c) 2007 - 2021 Realtek Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of version 2 of the GNU General Public License as
@@ -28,6 +27,151 @@ atomic_t _malloc_size = ATOMIC_INIT(0);
 #endif
 #endif /* DBG_MEMORY_LEAK */
 
+
+#ifdef DBG_MEM_ERR_FREE
+
+#if (KERNEL_VERSION(3, 7, 0) <= LINUX_VERSION_CODE)
+
+#define DBG_MEM_HASHBITS 10
+
+#define DBG_MEM_TYPE_PHY 0
+#define DBG_MEM_TYPE_VIR 1
+
+/*
+ * DBG_MEM_ERR_FREE is only for the debug purpose.
+ *
+ * There is the limitation that this mechanism only can
+ * support one wifi device, and has problem if there
+ * are two or more wifi devices with one driver on
+ * the same system. It's because dbg_mem_ht is global
+ * variable, and if we move this dbg_mem_ht into struct
+ * dvobj_priv to support more wifi devices, the memory
+ * allocation functions, like rtw_malloc(), need to have
+ * the parameter dvobj to get relative hash table, and
+ * then it is the huge changes for the driver currently.
+ *
+ */
+struct hlist_head dbg_mem_ht[1 << DBG_MEM_HASHBITS];
+
+struct hash_mem {
+	void *mem;
+	int sz;
+	int type;
+	struct hlist_node node;
+};
+
+#endif /* LINUX_VERSION_CODE */
+
+void rtw_dbg_mem_init(void)
+{
+#if (KERNEL_VERSION(3, 7, 0) <= LINUX_VERSION_CODE)
+	hash_init(dbg_mem_ht);
+#endif /* LINUX_VERSION_CODE */
+}
+
+void rtw_dbg_mem_deinit(void)
+{
+#if (KERNEL_VERSION(3, 7, 0) <= LINUX_VERSION_CODE)
+	struct hlist_head *head;
+	struct hlist_node *p;
+	int i;
+
+	for (i = 0; i < HASH_SIZE(dbg_mem_ht); i++) {
+		head = &dbg_mem_ht[i];
+		p = head->first;
+		while (p) {
+			struct hlist_node *prev;
+			struct hash_mem *hm;
+
+			hm = container_of(p, struct hash_mem, node);
+			prev = p;
+			p = p->next;
+
+			RTW_ERR("%s: memory leak - 0x%x\n", __func__, hm->mem);
+			hash_del(prev);
+			kfree(hm);
+		}
+	}
+#endif /* LINUX_VERSION_CODE */
+}
+
+#if (KERNEL_VERSION(3, 7, 0) <= LINUX_VERSION_CODE)
+struct hash_mem *rtw_dbg_mem_find(void *mem)
+{
+	struct hash_mem *hm;
+	struct hlist_head *head;
+	struct hlist_node *p;
+
+	head = &dbg_mem_ht[hash_64((u64)(mem), DBG_MEM_HASHBITS)];
+
+	p = head->first;
+	while (p) {
+		hm = container_of(p, struct hash_mem, node);
+		if (hm->mem == mem)
+			goto out;
+		p = p->next;
+	}
+	hm = NULL;
+out:
+	return hm;
+}
+
+void rtw_dbg_mem_alloc(void *mem, int sz, int type)
+{
+	struct hash_mem *hm;
+
+	hm = rtw_dbg_mem_find(mem);
+	if (!hm) {
+		hm = (struct hash_mem *)kmalloc(sizeof(*hm), GFP_ATOMIC);
+		hm->mem = mem;
+		hm->sz = sz;
+		hm->type = type;
+		hash_add(dbg_mem_ht, &hm->node, (u64)(mem));
+	} else {
+		RTW_ERR("%s mem(%x) is in hash already\n", __func__, mem);
+		rtw_warn_on(1);
+	}
+}
+
+bool rtw_dbg_mem_free(void *mem, int sz, int type)
+{
+	struct hash_mem *hm;
+	bool ret;
+
+	hm = rtw_dbg_mem_find(mem);
+	if (!hm) {
+		RTW_ERR("%s cannot find allocated memory: %x\n",
+			__func__, mem);
+		rtw_warn_on(1);
+		return false;
+	}
+
+	if (hm->sz != sz) {
+		RTW_ERR("%s memory (%x) size mismatch free(%d) != alloc(%d)\n",
+			__func__, mem, sz, hm->sz);
+		rtw_warn_on(1);
+		ret = false;
+		goto out;
+	}
+
+	if (hm->type != type) {
+		RTW_ERR("%s memory (%x) type mismatch free(%d) != alloc(%d)\n",
+			__func__, mem, type, hm->type);
+		rtw_warn_on(1);
+		ret = false;
+		goto out;
+	}
+	ret = true;
+
+out:
+	hash_del(&hm->node);
+	kfree(hm);
+
+	return ret;
+}
+
+#endif /* LINUX_VERSION_CODE */
+#endif /* DBG_MEM_ERR_FREE */
 
 #if defined(PLATFORM_LINUX)
 /*
@@ -88,6 +232,11 @@ inline void *_rtw_vmalloc(u32 sz)
 	NdisAllocateMemoryWithTag(&pbuf, sz, RT_TAG);
 #endif
 
+#ifdef DBG_MEM_ERR_FREE
+	if (pbuf)
+		rtw_dbg_mem_alloc(pbuf, sz, DBG_MEM_TYPE_VIR);
+#endif /* DBG_MEM_ERR_FREE */
+
 #ifdef DBG_MEMORY_LEAK
 #ifdef PLATFORM_LINUX
 	if (pbuf != NULL) {
@@ -122,6 +271,11 @@ inline void *_rtw_zvmalloc(u32 sz)
 
 inline void _rtw_vmfree(void *pbuf, u32 sz)
 {
+#ifdef DBG_MEM_ERR_FREE
+	if (!rtw_dbg_mem_free(pbuf, sz, DBG_MEM_TYPE_VIR))
+		return;
+#endif /* DBG_MEM_ERR_FREE */
+
 #ifdef PLATFORM_LINUX
 	vfree(pbuf);
 #endif
@@ -162,6 +316,11 @@ void *_rtw_malloc(u32 sz)
 
 #endif
 
+#ifdef DBG_MEM_ERR_FREE
+	if (pbuf)
+		rtw_dbg_mem_alloc(pbuf, sz, DBG_MEM_TYPE_PHY);
+#endif /* DBG_MEM_ERR_FREE */
+
 #ifdef DBG_MEMORY_LEAK
 #ifdef PLATFORM_LINUX
 	if (pbuf != NULL) {
@@ -192,7 +351,6 @@ void *_rtw_zmalloc(u32 sz)
 #ifdef PLATFORM_WINDOWS
 		NdisFillMemory(pbuf, sz, 0);
 #endif
-
 	}
 
 	return pbuf;
@@ -201,6 +359,11 @@ void *_rtw_zmalloc(u32 sz)
 
 void _rtw_mfree(void *pbuf, u32 sz)
 {
+
+#ifdef DBG_MEM_ERR_FREE
+	if (!rtw_dbg_mem_free(pbuf, sz, DBG_MEM_TYPE_PHY))
+		return;
+#endif /* DBG_MEM_ERR_FREE */
 
 #ifdef PLATFORM_LINUX
 #ifdef RTK_DMP_PLATFORM
@@ -275,6 +438,38 @@ struct sk_buff *skb_clone(const struct sk_buff *skb)
 }
 
 #endif /* PLATFORM_FREEBSD */
+
+#ifdef CONFIG_PCIE_DMA_COHERENT
+struct sk_buff *dev_alloc_skb_coherent(struct pci_dev *pdev, unsigned int size)
+{
+	struct sk_buff *skb = NULL;
+	unsigned char *data = NULL;
+
+	/* skb = _rtw_zmalloc(sizeof(struct sk_buff)); */ /* for skb->len, etc. */
+
+	skb = _rtw_malloc(sizeof(struct sk_buff));
+	if (!skb)
+		goto out;
+
+	data = dma_alloc_coherent(&pdev->dev, size, (dma_addr_t *)&skb->cb, GFP_KERNEL);
+
+	if (!data)
+		goto nodata;
+
+	skb->head = data;
+	skb->data = data;
+	skb_reset_tail_pointer(skb);
+	skb->end = skb->tail + size;
+	skb->len = 0;
+out:
+	return skb;
+nodata:
+	_rtw_mfree(skb, sizeof(struct sk_buff));
+	skb = NULL;
+	goto out;
+
+}
+#endif
 
 inline struct sk_buff *_rtw_skb_alloc(u32 sz)
 {
@@ -444,9 +639,6 @@ void rtw_mstat_dump(void *sel)
 #ifdef RTW_MEM_FUNC_STAT
 	int value_f[4][mstat_ff_idx(MSTAT_FUNC_MAX)];
 #endif
-
-	int vir_alloc, vir_peak, vir_alloc_err, phy_alloc, phy_peak, phy_alloc_err;
-	int tx_alloc, tx_peak, tx_alloc_err, rx_alloc, rx_peak, rx_alloc_err;
 
 	for (i = 0; i < mstat_tf_idx(MSTAT_TYPE_MAX); i++) {
 		value_t[0][i] = ATOMIC_READ(&(rtw_mem_type_stat[i].alloc));
@@ -976,6 +1168,24 @@ int	_rtw_memcmp(const void *dst, const void *src, u32 sz)
 
 }
 
+int _rtw_memcmp2(const void *dst, const void *src, u32 sz)
+{
+	const unsigned char *p1 = dst, *p2 = src;
+
+	if (sz == 0)
+		return 0;
+
+	while (*p1 == *p2) {
+		p1++;
+		p2++;
+		sz--;
+		if (sz == 0)
+			return 0;
+	}
+
+	return *p1 - *p2;
+}
+
 void _rtw_memset(void *pbuf, int c, u32 sz)
 {
 
@@ -1295,7 +1505,11 @@ u32 _rtw_down_sema(_sema *sema)
 inline void thread_exit(_completion *comp)
 {
 #ifdef PLATFORM_LINUX
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 17, 0))
 	complete_and_exit(comp, 0);
+#else
+	kthread_complete_and_exit(comp, 0);
+#endif
 #endif
 
 #ifdef PLATFORM_FREEBSD
@@ -1614,6 +1828,231 @@ inline bool _rtw_time_after(systime a, systime b)
 #endif
 }
 
+sysptime rtw_sptime_get(void)
+{
+	/* CLOCK_MONOTONIC */
+#ifdef PLATFORM_LINUX
+	#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 17, 0))
+	struct timespec64 cur;
+
+	ktime_get_ts64(&cur);
+	return timespec64_to_ktime(cur);
+	#else
+	struct timespec cur;
+
+	ktime_get_ts(&cur);
+	return timespec_to_ktime(cur);
+	#endif
+#else
+	#error "TBD\n"
+#endif
+}
+
+sysptime rtw_sptime_set(s64 secs, const u32 nsecs)
+{
+#ifdef PLATFORM_LINUX
+	return ktime_set(secs, nsecs);
+#else
+	#error "TBD\n"
+#endif
+}
+
+sysptime rtw_sptime_zero(void)
+{
+#ifdef PLATFORM_LINUX
+	return ktime_set(0, 0);
+#else
+	#error "TBD\n"
+#endif
+}
+
+/*
+ *   cmp1  < cmp2: return <0
+ *   cmp1 == cmp2: return 0
+ *   cmp1  > cmp2: return >0
+ */
+int rtw_sptime_cmp(const sysptime cmp1, const sysptime cmp2)
+{
+#ifdef PLATFORM_LINUX
+	#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 8, 0))
+	return ktime_compare(cmp1, cmp2);
+	#else
+	if (cmp1.tv64 < cmp2.tv64)
+		return -1;
+	if (cmp1.tv64 > cmp2.tv64)
+		return 1;
+	return 0;
+	#endif
+#else
+	#error "TBD\n"
+#endif
+}
+
+bool rtw_sptime_eql(const sysptime cmp1, const sysptime cmp2)
+{
+#ifdef PLATFORM_LINUX
+	return rtw_sptime_cmp(cmp1, cmp2) == 0;
+#else
+	#error "TBD\n"
+#endif
+}
+
+bool rtw_sptime_is_zero(const sysptime sptime)
+{
+#ifdef PLATFORM_LINUX
+	return rtw_sptime_cmp(sptime, rtw_sptime_zero()) == 0;
+#else
+	#error "TBD\n"
+#endif
+}
+
+/*
+ * sub = lhs - rhs, in normalized form
+ */
+sysptime rtw_sptime_sub(const sysptime lhs, const sysptime rhs)
+{
+#ifdef PLATFORM_LINUX
+	return ktime_sub(lhs, rhs);
+#else
+	#error "TBD\n"
+#endif
+}
+
+/*
+ * add = lhs + rhs, in normalized form
+ */
+sysptime rtw_sptime_add(const sysptime lhs, const sysptime rhs)
+{
+#ifdef PLATFORM_LINUX
+	return ktime_add(lhs, rhs);
+#else
+	#error "TBD\n"
+#endif
+}
+
+s64 rtw_sptime_to_ms(const sysptime sptime)
+{
+#ifdef PLATFORM_LINUX
+	#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 35))
+	return ktime_to_ms(sptime);
+	#else
+	struct timeval tv = ktime_to_timeval(sptime);
+
+	return (s64) tv.tv_sec * MSEC_PER_SEC + tv.tv_usec / USEC_PER_MSEC;
+	#endif
+#else
+	#error "TBD\n"
+#endif
+}
+
+sysptime rtw_ms_to_sptime(u64 ms)
+{
+#ifdef PLATFORM_LINUX
+	return ns_to_ktime(ms * NSEC_PER_MSEC);
+#else
+	#error "TBD\n"
+#endif
+}
+
+s64 rtw_sptime_to_us(const sysptime sptime)
+{
+#ifdef PLATFORM_LINUX
+	#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 22))
+	return ktime_to_us(sptime);
+	#else
+	struct timeval tv = ktime_to_timeval(sptime);
+
+	return (s64) tv.tv_sec * USEC_PER_SEC + tv.tv_usec;
+	#endif
+#else
+	#error "TBD\n"
+#endif
+}
+
+sysptime rtw_us_to_sptime(u64 us)
+{
+#ifdef PLATFORM_LINUX
+	return ns_to_ktime(us * NSEC_PER_USEC);
+#else
+	#error "TBD\n"
+#endif
+}
+
+s64 rtw_sptime_to_ns(const sysptime sptime)
+{
+#ifdef PLATFORM_LINUX
+	return ktime_to_ns(sptime);
+#else
+	#error "TBD\n"
+#endif
+}
+
+sysptime rtw_ns_to_sptime(u64 ns)
+{
+#ifdef PLATFORM_LINUX
+	return ns_to_ktime(ns);
+#else
+	#error "TBD\n"
+#endif
+}
+
+s64 rtw_sptime_diff_ms(const sysptime start, const sysptime end)
+{
+	sysptime diff;
+
+	diff = rtw_sptime_sub(end, start);
+
+	return rtw_sptime_to_ms(diff);
+}
+
+s64 rtw_sptime_pass_ms(const sysptime start)
+{
+	sysptime cur, diff;
+
+	cur = rtw_sptime_get();
+	diff = rtw_sptime_sub(cur, start);
+
+	return rtw_sptime_to_ms(diff);
+}
+
+s64 rtw_sptime_diff_us(const sysptime start, const sysptime end)
+{
+	sysptime diff;
+
+	diff = rtw_sptime_sub(end, start);
+
+	return rtw_sptime_to_us(diff);
+}
+
+s64 rtw_sptime_pass_us(const sysptime start)
+{
+	sysptime cur, diff;
+
+	cur = rtw_sptime_get();
+	diff = rtw_sptime_sub(cur, start);
+
+	return rtw_sptime_to_us(diff);
+}
+
+s64 rtw_sptime_diff_ns(const sysptime start, const sysptime end)
+{
+	sysptime diff;
+
+	diff = rtw_sptime_sub(end, start);
+
+	return rtw_sptime_to_ns(diff);
+}
+
+s64 rtw_sptime_pass_ns(const sysptime start)
+{
+	sysptime cur, diff;
+
+	cur = rtw_sptime_get();
+	diff = rtw_sptime_sub(cur, start);
+
+	return rtw_sptime_to_ns(diff);
+}
+
 void rtw_sleep_schedulable(int ms)
 {
 
@@ -1626,8 +2065,7 @@ void rtw_sleep_schedulable(int ms)
 		delta = 1;/* 1 ms */
 	}
 	set_current_state(TASK_INTERRUPTIBLE);
-	if (schedule_timeout(delta) != 0)
-		return ;
+        schedule_timeout(delta);
 	return;
 
 #endif
@@ -1807,6 +2245,46 @@ void rtw_yield_os(void)
 #ifdef PLATFORM_WINDOWS
 	SwitchToThread();
 #endif
+}
+
+const char *_rtw_pwait_type_str[] = {
+	[RTW_PWAIT_TYPE_MSLEEP] = "MS",
+	[RTW_PWAIT_TYPE_USLEEP] = "US",
+	[RTW_PWAIT_TYPE_YIELD] = "Y",
+	[RTW_PWAIT_TYPE_MDELAY] = "MD",
+	[RTW_PWAIT_TYPE_UDELAY] = "UD",
+	[RTW_PWAIT_TYPE_NUM] = "unknown",
+};
+
+static void rtw_pwctx_yield(int us)
+{
+	rtw_yield_os();
+}
+
+static void (*const rtw_pwait_hdl[])(int)= {
+	[RTW_PWAIT_TYPE_MSLEEP] = rtw_msleep_os,
+	[RTW_PWAIT_TYPE_USLEEP] = rtw_usleep_os,
+	[RTW_PWAIT_TYPE_YIELD] = rtw_pwctx_yield,
+	[RTW_PWAIT_TYPE_MDELAY] = rtw_mdelay_os,
+	[RTW_PWAIT_TYPE_UDELAY] = rtw_udelay_os,
+};
+
+int rtw_pwctx_config(struct rtw_pwait_ctx *pwctx, enum rtw_pwait_type type, s32 time, s32 cnt_lmt)
+{
+	int ret = _FAIL;
+
+	if (!RTW_PWAIT_TYPE_VALID(type))
+		goto exit;
+
+	pwctx->conf.type = type;
+	pwctx->conf.wait_time = time;
+	pwctx->conf.wait_cnt_lmt = cnt_lmt;
+	pwctx->wait_hdl = rtw_pwait_hdl[type];
+
+	ret = _SUCCESS;
+
+exit:
+	return ret;
 }
 
 bool rtw_macaddr_is_larger(const u8 *a, const u8 *b)
@@ -2099,6 +2577,7 @@ inline bool ATOMIC_INC_UNLESS(ATOMIC_T *v, int u)
 }
 
 #ifdef PLATFORM_LINUX
+#if !defined(CONFIG_RTW_ANDROID_GKI)
 /*
 * Open a file with the specific @param path, @param flag, @param mode
 * @param fpp the pointer of struct file pointer to get struct file pointer while file opening is success
@@ -2167,11 +2646,21 @@ static int writeFile(struct file *fp, char *buf, int len)
 {
 	int wlen = 0, sum = 0;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0))
+	if (!(fp->f_mode & FMODE_CAN_WRITE))
+#else
 	if (!fp->f_op || !fp->f_op->write)
+#endif
 		return -EPERM;
 
 	while (sum < len) {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0))
+		wlen = kernel_write(fp, buf + sum, len - sum, &fp->f_pos);
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0))
+		wlen = __vfs_write(fp, buf + sum, len - sum, &fp->f_pos);
+#else
 		wlen = fp->f_op->write(fp, buf + sum, len - sum, &fp->f_pos);
+#endif
 		if (wlen > 0)
 			sum += wlen;
 		else if (0 != wlen)
@@ -2185,6 +2674,20 @@ static int writeFile(struct file *fp, char *buf, int len)
 }
 
 /*
+* Test if the specifi @param pathname is a direct and readable
+* If readable, @param sz is not used
+* @param pathname the name of the path to test
+* @return Linux specific error code
+*/
+static int isDirReadable(const char *pathname, u32 *sz)
+{
+	struct path path;
+	int error = 0;
+
+	return kern_path(pathname, LOOKUP_FOLLOW, &path);
+}
+
+/*
 * Test if the specifi @param path is a file and readable
 * If readable, @param sz is got
 * @param path the path of the file to test
@@ -2194,18 +2697,22 @@ static int isFileReadable(const char *path, u32 *sz)
 {
 	struct file *fp;
 	int ret = 0;
+	#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0))
 	mm_segment_t oldfs;
+	#endif
 	char buf;
 
 	fp = filp_open(path, O_RDONLY, 0);
 	if (IS_ERR(fp))
 		ret = PTR_ERR(fp);
 	else {
+		#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0))
 		oldfs = get_fs();
 		#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0))
 		set_fs(KERNEL_DS);
 		#else
-		set_fs(KERNEL_DS);
+		set_fs(get_ds());
+		#endif
 		#endif
 
 		if (1 != readFile(fp, &buf, 1))
@@ -2219,47 +2726,10 @@ static int isFileReadable(const char *path, u32 *sz)
 			#endif
 		}
 
+		#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0))
 		set_fs(oldfs);
+		#endif
 		filp_close(fp, NULL);
-	}
-	return ret;
-}
-
-/*
-* Open the file with @param path and retrive the file content into memory starting from @param buf for @param sz at most
-* @param path the path of the file to open and read
-* @param buf the starting address of the buffer to store file content
-* @param sz how many bytes to read at most
-* @return the byte we've read, or Linux specific error code
-*/
-static int retriveFromFile(const char *path, u8 *buf, u32 sz)
-{
-	int ret = -1;
-	mm_segment_t oldfs;
-	struct file *fp;
-
-	if (path && buf) {
-		ret = openFile(&fp, path, O_RDONLY, 0);
-		if (0 == ret) {
-			RTW_INFO("%s openFile path:%s fp=%p\n", __FUNCTION__, path , fp);
-
-			oldfs = get_fs();
-			#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0))
-			set_fs(KERNEL_DS);
-			#else
-			set_fs(KERNEL_DS);
-			#endif
-			ret = readFile(fp, buf, sz);
-			set_fs(oldfs);
-			closeFile(fp);
-
-			RTW_INFO("%s readFile, ret:%d\n", __FUNCTION__, ret);
-
-		} else
-			RTW_INFO("%s openFile path:%s Fail, ret:%d\n", __FUNCTION__, path, ret);
-	} else {
-		RTW_INFO("%s NULL pointer\n", __FUNCTION__);
-		ret =  -EINVAL;
 	}
 	return ret;
 }
@@ -2274,7 +2744,9 @@ static int retriveFromFile(const char *path, u8 *buf, u32 sz)
 static int storeToFile(const char *path, u8 *buf, u32 sz)
 {
 	int ret = 0;
+	#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0))
 	mm_segment_t oldfs;
+	#endif
 	struct file *fp;
 
 	if (path && buf) {
@@ -2282,14 +2754,20 @@ static int storeToFile(const char *path, u8 *buf, u32 sz)
 		if (0 == ret) {
 			RTW_INFO("%s openFile path:%s fp=%p\n", __FUNCTION__, path , fp);
 
+			#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0))
 			oldfs = get_fs();
 			#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0))
 			set_fs(KERNEL_DS);
 			#else
-			set_fs(KERNEL_DS);
+			set_fs(get_ds());
 			#endif
+			#endif
+
 			ret = writeFile(fp, buf, sz);
+
+			#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0))
 			set_fs(oldfs);
+			#endif
 			closeFile(fp);
 
 			RTW_INFO("%s writeFile, ret:%d\n", __FUNCTION__, ret);
@@ -2302,7 +2780,138 @@ static int storeToFile(const char *path, u8 *buf, u32 sz)
 	}
 	return ret;
 }
+#endif /* !defined(CONFIG_RTW_ANDROID_GKI)*/
 #endif /* PLATFORM_LINUX */
+
+#if !defined(CONFIG_RTW_ANDROID_GKI)
+/*
+* Test if the specifi @param path is a direct and readable
+* @param path the path of the direct to test
+* @return _TRUE or _FALSE
+*/
+int rtw_is_dir_readable(const char *path)
+{
+#ifdef PLATFORM_LINUX
+	if (isDirReadable(path, NULL) == 0)
+		return _TRUE;
+	else
+		return _FALSE;
+#else
+	/* Todo... */
+	return _FALSE;
+#endif
+}
+#endif /* !defined(CONFIG_RTW_ANDROID_GKI) */
+
+/*
+* Open the file with @param path and retrive the file content into memory starting from @param buf for @param sz at most
+* @param path the path of the file to open and read
+* @param buf the starting address of the buffer to store file content
+* @param sz how many bytes to read at most
+* @return the byte we've read, or Linux specific error code
+*/
+static int retriveFromFile(const char *path, u8 *buf, u32 sz)
+{
+#if defined(CONFIG_RTW_ANDROID_GKI)
+	int ret = -EINVAL;
+	const struct firmware *fw = NULL;
+	char* const delim = "/";
+	char *name, *token, *cur, *path_tmp = NULL;
+
+
+	if (path == NULL || buf == NULL) {
+		RTW_ERR("%s() NULL pointer\n", __func__);
+		goto err;
+	}
+
+	path_tmp = kstrdup(path, GFP_KERNEL);
+	if (path_tmp == NULL) {
+		RTW_ERR("%s() cannot copy path for parsing file name\n", __func__);
+		goto err;
+	}
+
+	/* parsing file name from path */
+	cur = path_tmp;
+	token = strsep(&cur, delim);
+	while (token != NULL) {
+		token = strsep(&cur, delim);
+		if(token)
+			name = token;
+	}
+
+	if (name == NULL) {
+		RTW_ERR("%s() parsing file name fail\n", __func__);
+		goto err;
+	}
+
+	/* request_firmware() will find file in /vendor/firmware but not in path */
+	ret = request_firmware(&fw, name, NULL);
+	if (ret == 0) {
+		RTW_INFO("%s() Success. retrieve file : %s, file size : %zu\n", __func__, name, fw->size);
+
+		if ((u32)fw->size < sz) {
+			_rtw_memcpy(buf, fw->data, (u32)fw->size);
+			ret = (u32)fw->size;
+			goto exit;
+		} else {
+			RTW_ERR("%s() file size : %zu exceed buf size : %u\n", __func__, fw->size, sz);
+			ret = -EFBIG;
+			goto err;
+		}
+	} else {
+		RTW_ERR("%s() Fail. retrieve file : %s, error : %d\n", __func__, name, ret);
+		goto err;
+	}
+
+
+
+err:
+	RTW_ERR("%s() Fail. retrieve file : %s, error : %d\n", __func__, path, ret);
+exit:
+	if (path_tmp)
+		kfree(path_tmp);
+	if (fw)
+		release_firmware(fw);
+	return ret;
+#else /* !defined(CONFIG_RTW_ANDROID_GKI) */
+	int ret = -1;
+	#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0))
+	mm_segment_t oldfs;
+	#endif
+	struct file *fp;
+
+	if (path && buf) {
+		ret = openFile(&fp, path, O_RDONLY, 0);
+		if (0 == ret) {
+			RTW_INFO("%s openFile path:%s fp=%p\n", __FUNCTION__, path , fp);
+
+			#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0))
+			oldfs = get_fs();
+			#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0))
+			set_fs(KERNEL_DS);
+			#else
+			set_fs(get_ds());
+			#endif
+			#endif
+
+			ret = readFile(fp, buf, sz);
+
+			#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0))
+			set_fs(oldfs);
+			#endif
+			closeFile(fp);
+
+			RTW_INFO("%s readFile, ret:%d\n", __FUNCTION__, ret);
+
+		} else
+			RTW_INFO("%s openFile path:%s Fail, ret:%d\n", __FUNCTION__, path, ret);
+	} else {
+		RTW_INFO("%s NULL pointer\n", __FUNCTION__);
+		ret =  -EINVAL;
+	}
+	return ret;
+#endif /* defined(CONFIG_RTW_ANDROID_GKI) */
+}
 
 /*
 * Test if the specifi @param path is a file and readable
@@ -2312,10 +2921,15 @@ static int storeToFile(const char *path, u8 *buf, u32 sz)
 int rtw_is_file_readable(const char *path)
 {
 #ifdef PLATFORM_LINUX
+#if !defined(CONFIG_RTW_ANDROID_GKI)
 	if (isFileReadable(path, NULL) == 0)
 		return _TRUE;
 	else
 		return _FALSE;
+#else
+	RTW_INFO("%s() Android GKI prohibbit kernel_read, return _TRUE\n", __func__);
+	return  _TRUE;
+#endif /* !defined(CONFIG_RTW_ANDROID_GKI) */
 #else
 	/* Todo... */
 	return _FALSE;
@@ -2331,10 +2945,16 @@ int rtw_is_file_readable(const char *path)
 int rtw_is_file_readable_with_size(const char *path, u32 *sz)
 {
 #ifdef PLATFORM_LINUX
+#if !defined(CONFIG_RTW_ANDROID_GKI)
 	if (isFileReadable(path, sz) == 0)
 		return _TRUE;
 	else
 		return _FALSE;
+#else
+	RTW_INFO("%s() Android GKI prohibbit kernel_read, return _TRUE\n", __func__);
+	*sz = 0;
+	return  _TRUE;
+#endif /* !defined(CONFIG_RTW_ANDROID_GKI) */
 #else
 	/* Todo... */
 	return _FALSE;
@@ -2378,6 +2998,7 @@ int rtw_retrieve_from_file(const char *path, u8 *buf, u32 sz)
 #endif
 }
 
+#if !defined(CONFIG_RTW_ANDROID_GKI)
 /*
 * Open the file with @param path and wirte @param sz byte of data starting from @param buf into the file
 * @param path the path of the file to open and write
@@ -2395,6 +3016,7 @@ int rtw_store_to_file(const char *path, u8 *buf, u32 sz)
 	return 0;
 #endif
 }
+#endif /* !defined(CONFIG_RTW_ANDROID_GKI) */
 
 #ifdef PLATFORM_LINUX
 struct net_device *rtw_alloc_etherdev_with_old_priv(int sizeof_priv, void *old_priv)
@@ -2463,65 +3085,6 @@ RETURN:
 	return;
 }
 
-int rtw_change_ifname(_adapter *padapter, const char *ifname)
-{
-	struct dvobj_priv *dvobj;
-	struct net_device *pnetdev;
-	struct net_device *cur_pnetdev;
-	struct rereg_nd_name_data *rereg_priv;
-	int ret;
-	u8 rtnl_lock_needed;
-
-	if (!padapter)
-		goto error;
-
-	dvobj = adapter_to_dvobj(padapter);
-	cur_pnetdev = padapter->pnetdev;
-	rereg_priv = &padapter->rereg_nd_name_priv;
-
-	/* free the old_pnetdev */
-	if (rereg_priv->old_pnetdev) {
-		free_netdev(rereg_priv->old_pnetdev);
-		rereg_priv->old_pnetdev = NULL;
-	}
-
-	rtnl_lock_needed = rtw_rtnl_lock_needed(dvobj);
-
-	if (rtnl_lock_needed)
-		unregister_netdev(cur_pnetdev);
-	else
-		unregister_netdevice(cur_pnetdev);
-
-	rereg_priv->old_pnetdev = cur_pnetdev;
-
-	pnetdev = rtw_init_netdev(padapter);
-	if (!pnetdev)  {
-		ret = -1;
-		goto error;
-	}
-
-	SET_NETDEV_DEV(pnetdev, dvobj_to_dev(adapter_to_dvobj(padapter)));
-
-	rtw_init_netdev_name(pnetdev, ifname);
-
-	_rtw_memcpy(pnetdev->dev_addr, adapter_mac_addr(padapter), ETH_ALEN);
-
-	if (rtnl_lock_needed)
-		ret = register_netdev(pnetdev);
-	else
-		ret = register_netdevice(pnetdev);
-
-	if (ret != 0) {
-		goto error;
-	}
-
-	return 0;
-
-error:
-
-	return -1;
-
-}
 #endif
 
 #ifdef PLATFORM_FREEBSD
@@ -2627,7 +3190,9 @@ u64 rtw_division64(u64 x, u64 y)
 inline u32 rtw_random32(void)
 {
 #ifdef PLATFORM_LINUX
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 8, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+	return get_random_u32();
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 8, 0))
 	return prandom_u32();
 #elif (LINUX_VERSION_CODE <= KERNEL_VERSION(2, 6, 18))
 	u32 random_int;
@@ -2645,22 +3210,15 @@ inline u32 rtw_random32(void)
 
 void rtw_buf_free(u8 **buf, u32 *buf_len)
 {
-	u32 ori_len;
-
-	if (!buf || !buf_len)
+	if (!buf || !(*buf) || !buf_len)
 		return;
 
-	ori_len = *buf_len;
-
-	if (*buf) {
-		u32 tmp_buf_len = *buf_len;
-		*buf_len = 0;
-		rtw_mfree(*buf, tmp_buf_len);
-		*buf = NULL;
-	}
+	rtw_mfree(*buf, *buf_len);
+	*buf = NULL;
+	*buf_len = 0;
 }
 
-void rtw_buf_update(u8 **buf, u32 *buf_len, u8 *src, u32 src_len)
+void rtw_buf_update(u8 **buf, u32 *buf_len, const u8 *src, u32 src_len)
 {
 	u32 ori_len = 0, dup_len = 0;
 	u8 *ori = NULL;
@@ -2876,6 +3434,7 @@ exit:
 	return val;
 }
 
+#ifdef CONFIG_RTW_MESH
 int rtw_blacklist_add(_queue *blist, const u8 *addr, u32 timeout_ms)
 {
 	struct blacklist_ent *ent;
@@ -3033,6 +3592,7 @@ void dump_blacklist(void *sel, _queue *blist, const char *title)
 	}
 	exit_critical_bh(&blist->lock);
 }
+#endif
 
 /**
 * is_null -
@@ -3080,6 +3640,20 @@ inline BOOLEAN is_eol(char c)
 inline BOOLEAN is_space(char c)
 {
 	if (c == ' ' || c == '\t')
+		return _TRUE;
+	else
+		return _FALSE;
+}
+
+/**
+* is_decimal -
+*
+* Return	TRUE if chTmp is represent for decimal digit
+*		FALSE otherwise.
+*/
+inline BOOLEAN is_decimal(char chTmp)
+{
+	if ((chTmp >= '0' && chTmp <= '9'))
 		return _TRUE;
 	else
 		return _FALSE;
@@ -3161,5 +3735,75 @@ int hexstr2bin(const char *hex, u8 *buf, size_t len)
 		ipos += 2;
 	}
 	return 0;
+}
+
+/**
+ * hwaddr_aton - Convert ASCII string to MAC address
+ * @txt: MAC address as a string (e.g., "00:11:22:33:44:55")
+ * @addr: Buffer for the MAC address (ETH_ALEN = 6 bytes)
+ * Returns: 0 on success, -1 on failure (e.g., string not a MAC address)
+ */
+int hwaddr_aton_i(const char *txt, u8 *addr)
+{
+	int i;
+
+	for (i = 0; i < 6; i++) {
+		int a, b;
+
+		a = hex2num_i(*txt++);
+		if (a < 0)
+			return -1;
+		b = hex2num_i(*txt++);
+		if (b < 0)
+			return -1;
+		*addr++ = (a << 4) | b;
+		if (i < 5 && *txt++ != ':')
+			return -1;
+	}
+
+	return 0;
+}
+
+void ustrs_add(char **ustrs, int *ustrs_len, const char *str)
+{
+	char *tmp_ustrs;
+	int tmp_ustrs_len;
+
+	if (!str || !strlen(str))
+		return;
+
+	tmp_ustrs = *ustrs;
+	tmp_ustrs_len = *ustrs_len;
+	if (tmp_ustrs) {
+		const char *pos;
+
+		/* search for same string */
+		for (pos = tmp_ustrs; pos < tmp_ustrs + tmp_ustrs_len; pos += strlen(pos) + 1) {
+			if (strcmp(pos, str) == 0)
+				return;
+		}
+
+		/* no match, realloc and add */
+		tmp_ustrs = rtw_malloc(tmp_ustrs_len + strlen(str) + 1);
+		if (!tmp_ustrs) {
+			rtw_warn_on(1);
+			return;
+		}
+		_rtw_memcpy((void *)tmp_ustrs, *ustrs, tmp_ustrs_len);
+		_rtw_memcpy((void *)(tmp_ustrs + tmp_ustrs_len), str, strlen(str) + 1);
+		rtw_mfree((void *)*ustrs, tmp_ustrs_len);
+		*ustrs = tmp_ustrs;
+		*ustrs_len += strlen(str) + 1;
+
+	} else {
+		tmp_ustrs = rtw_malloc(strlen(str) + 1);
+		if (!tmp_ustrs) {
+			rtw_warn_on(1);
+			return;
+		}
+		_rtw_memcpy((void *)tmp_ustrs, str, strlen(str) + 1);
+		*ustrs = tmp_ustrs;
+		*ustrs_len = strlen(str) + 1;
+	}
 }
 

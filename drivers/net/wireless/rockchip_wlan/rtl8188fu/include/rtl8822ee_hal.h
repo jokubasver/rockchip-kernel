@@ -1,7 +1,6 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
- * Copyright(c) 2009-2010 - 2017 Realtek Corporation.
+ * Copyright(c) 2015 - 2017 Realtek Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of version 2 of the GNU General Public License as
@@ -13,23 +12,16 @@
  * more details.
  *
  *****************************************************************************/
+#ifndef _RTL8822EE_HAL_H_
+#define _RTL8822EE_HAL_H_
 
-#ifndef __RTW_WIFI_REGD_H__
-#define __RTW_WIFI_REGD_H__
+#include <drv_types.h>		/* PADAPTER */
 
-struct country_code_to_enum_rd {
-	u16 countrycode;
-	const char *iso_name;
-};
+#define RT_BCN_INT_MASKS	(BIT20 | BIT25 | BIT26 | BIT16)
 
-enum country_code_type_t {
-	COUNTRY_CODE_USER = 0,
+/* rtl8822ee_ops.c */
+void UpdateInterruptMask8822EE(PADAPTER, u32 AddMSR, u32 AddMSR1, u32 RemoveMSR, u32 RemoveMSR1);
+u16 get_txbd_rw_reg(u16 q_idx);
 
-	/*add new channel plan above this line */
-	COUNTRY_CODE_MAX
-};
 
-void rtw_regd_apply_flags(struct wiphy *wiphy);
-int rtw_regd_init(struct wiphy *wiphy);
-
-#endif /* __RTW_WIFI_REGD_H__ */
+#endif /* _RTL8822EE_HAL_H_ */

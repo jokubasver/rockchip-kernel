@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2017 Realtek Corporation.
@@ -19,6 +18,9 @@
 
 #ifndef BIT
 #define BIT(x)	(1 << (x))
+#endif
+#ifndef BIT_ULL
+#define BIT_ULL(x)	(1ULL << (x))
 #endif
 
 
@@ -61,6 +63,10 @@
 #define WLAN_MAX_VENDOR_IE_MASK_MAX 5
 #endif
 #endif
+
+#ifdef CONFIG_WOW_KEEP_ALIVE_PATTERN
+#define WLAN_MAX_KEEP_ALIVE_IE_LEN 256
+#endif/*CONFIG_WOW_KEEP_ALIVE_PATTERN*/
 
 #define P80211CAPTURE_VERSION	0x80211001
 
@@ -298,7 +304,7 @@ enum WIFI_REG_DOMAIN {
 		*(unsigned short *)(pbuf) &= (~cpu_to_le16(_FROM_DS_)); \
 	} while (0)
 
-#define get_tofr_ds(pframe)	((GetToDs(pframe) << 1) | GetFrDs(pframe))
+#define get_tofr_ds(pframe)	((GetFrDs(pframe) << 1) | GetToDs(pframe))
 
 
 #define SetMFrag(pbuf)	\
@@ -474,17 +480,17 @@ __inline static unsigned char *get_ta(unsigned char *pframe)
 __inline static unsigned char *get_da(unsigned char *pframe)
 {
 	unsigned char	*da;
-	unsigned int	to_fr_ds	= (GetToDs(pframe) << 1) | GetFrDs(pframe);
+	unsigned int	to_fr_ds	= (GetFrDs(pframe) << 1) | GetToDs(pframe);
 
 	switch (to_fr_ds) {
 	case 0x00:	/* ToDs=0, FromDs=0 */
 		da = GetAddr1Ptr(pframe);
 		break;
-	case 0x01:	/* ToDs=0, FromDs=1 */
-		da = GetAddr1Ptr(pframe);
-		break;
-	case 0x02:	/* ToDs=1, FromDs=0 */
+	case 0x01:	/* ToDs=1, FromDs=0 */
 		da = GetAddr3Ptr(pframe);
+		break;
+	case 0x02:	/* ToDs=0, FromDs=1 */
+		da = GetAddr1Ptr(pframe);
 		break;
 	default:	/* ToDs=1, FromDs=1 */
 		da = GetAddr3Ptr(pframe);
@@ -498,17 +504,17 @@ __inline static unsigned char *get_da(unsigned char *pframe)
 __inline static unsigned char *get_sa(unsigned char *pframe)
 {
 	unsigned char	*sa;
-	unsigned int	to_fr_ds	= (GetToDs(pframe) << 1) | GetFrDs(pframe);
+	unsigned int	to_fr_ds	= (GetFrDs(pframe) << 1) | GetToDs(pframe);
 
 	switch (to_fr_ds) {
 	case 0x00:	/* ToDs=0, FromDs=0 */
 		sa = get_addr2_ptr(pframe);
 		break;
-	case 0x01:	/* ToDs=0, FromDs=1 */
-		sa = GetAddr3Ptr(pframe);
-		break;
-	case 0x02:	/* ToDs=1, FromDs=0 */
+	case 0x01:	/* ToDs=1, FromDs=0 */
 		sa = get_addr2_ptr(pframe);
+		break;
+	case 0x02:	/* ToDs=0, FromDs=1 */
+		sa = GetAddr3Ptr(pframe);
 		break;
 	default:	/* ToDs=1, FromDs=1 */
 		sa = GetAddr4Ptr(pframe);
@@ -521,25 +527,25 @@ __inline static unsigned char *get_sa(unsigned char *pframe)
 /* can't apply to mesh mode */
 __inline static unsigned char *get_hdr_bssid(unsigned char *pframe)
 {
-	unsigned char	*sa = NULL;
-	unsigned int	to_fr_ds	= (GetToDs(pframe) << 1) | GetFrDs(pframe);
+	unsigned char	*bssid= NULL;
+	unsigned int	to_fr_ds	= (GetFrDs(pframe) << 1) | GetToDs(pframe);
 
 	switch (to_fr_ds) {
 	case 0x00:	/* ToDs=0, FromDs=0 */
-		sa = GetAddr3Ptr(pframe);
+		bssid = GetAddr3Ptr(pframe);
 		break;
-	case 0x01:	/* ToDs=0, FromDs=1 */
-		sa = get_addr2_ptr(pframe);
+	case 0x01:	/* ToDs=1, FromDs=0 */
+		bssid = GetAddr1Ptr(pframe);
 		break;
-	case 0x02:	/* ToDs=1, FromDs=0 */
-		sa = GetAddr1Ptr(pframe);
+	case 0x02:	/* ToDs=0, FromDs=1 */
+		bssid = get_addr2_ptr(pframe);
 		break;
 	case 0x03:	/* ToDs=1, FromDs=1 */
-		sa = GetAddr1Ptr(pframe);
+		bssid = GetAddr1Ptr(pframe);
 		break;
 	}
 
-	return sa;
+	return bssid;
 }
 
 
@@ -599,10 +605,8 @@ static inline int IsFrameTypeData(unsigned char *pframe)
 #define _DSSET_IE_				3
 #define _TIM_IE_					5
 #define _IBSS_PARA_IE_			6
-#define _COUNTRY_IE_			7
 #define _CHLGETXT_IE_			16
 #define _SUPPORTED_CH_IE_		36
-#define _CH_SWTICH_ANNOUNCE_	37	/* Secondary Channel Offset */
 #define	_MEAS_REQ_IE_		38
 #define	_MEAS_RSP_IE_		39
 #define _RSN_IE_2_				48
@@ -630,7 +634,6 @@ static inline int IsFrameTypeData(unsigned char *pframe)
 #define _LINK_ID_IE_					101
 #define _CH_SWITCH_TIMING_		104
 #define _PTI_BUFFER_STATUS_		106
-#define _EXT_CAP_IE_				127
 #define _VENDOR_SPECIFIC_IE_		221
 
 #define	_RESERVED47_				47
@@ -659,6 +662,7 @@ typedef	enum _ELEMENT_ID {
 	/* vivi for WIFITest, 802.11h AP, 20100427 */
 	/* 2010/12/26 MH The definition we can declare always!! */
 	EID_PowerCap				= 33,
+	EID_TPC				= 35,
 	EID_SupportedChannels		= 36,
 	EID_ChlSwitchAnnounce		= 37,
 
@@ -694,7 +698,6 @@ typedef	enum _ELEMENT_ID {
 	EID_PTIControl				= 105, /* Defined in 802.11z */
 	EID_PUBufferStatus			= 106, /* Defined in 802.11z */
 
-	EID_EXTCapability			= 127, /* Extended Capabilities */
 	/* From S19:Aironet IE and S21:AP IP address IE in CCX v1.13, p16 and p18. */
 	EID_Aironet					= 133, /* 0x85: Aironet Element for Cisco CCX */
 	EID_CiscoIP					= 149, /* 0x95: IP Address IE for Cisco CCX */
@@ -708,6 +711,7 @@ typedef	enum _ELEMENT_ID {
 	EID_WAPI					= 68,
 	EID_VHTCapability 			= 191, /* Based on 802.11ac D2.0 */
 	EID_VHTOperation 			= 192, /* Based on 802.11ac D2.0 */
+	EID_VHTTransmitPower 		= 195,
 	EID_AID						= 197, /* Based on 802.11ac D4.0 */
 	EID_OpModeNotification		= 199, /* Based on 802.11ac D3.0 */
 } ELEMENT_ID, *PELEMENT_ID;
@@ -731,19 +735,24 @@ typedef	enum _ELEMENT_ID {
 
 #define WLAN_ETHCONV_ENCAP		1
 #define WLAN_ETHCONV_RFC1042	2
-#define WLAN_ETHCONV_8021h		3
+#define WLAN_ETHCONV_8021h	3
 
-#define cap_ESS BIT(0)
-#define cap_IBSS BIT(1)
-#define cap_CFPollable BIT(2)
-#define cap_CFRequest BIT(3)
-#define cap_Privacy BIT(4)
-#define cap_ShortPremble BIT(5)
-#define cap_PBCC	BIT(6)
-#define cap_ChAgility	BIT(7)
-#define cap_SpecMgmt	BIT(8)
-#define cap_QoS	BIT(9)
-#define cap_ShortSlot	BIT(10)
+#define cap_ESS 		BIT(0)
+#define cap_IBSS		BIT(1)
+#define cap_CFPollable		BIT(2)
+#define cap_CFRequest		BIT(3)
+#define cap_Privacy		BIT(4)
+#define cap_ShortPremble	BIT(5)
+#define cap_PBCC		BIT(6)
+#define cap_ChAgility		BIT(7)
+#define cap_SpecMgmt		BIT(8)
+#define cap_QoS 		BIT(9)
+#define cap_ShortSlot		BIT(10)
+#define cap_APSD		BIT(11)
+#define cap_RM			BIT(12)
+#define cap_DSSSOFDM		BIT(13)
+#define cap_DelayedBACK 	BIT(14)
+#define cap_ImmediateBACK	BIT(15)
 
 /*-----------------------------------------------------------------------------
 				Below is the definition for 802.11i / 802.1x
@@ -761,7 +770,7 @@ typedef	enum _ELEMENT_ID {
 #define _WEP_WPA_MIXED_PRIVACY_ 6	/*  WEP + WPA */
 #endif
 
-#define _MME_IE_LENGTH_  18
+#define _MME_IE_LENGTH_  26
 
 /*-----------------------------------------------------------------------------
 				Below is the definition for WMM
@@ -1271,9 +1280,6 @@ enum P2P_PROTO_WK_ID {
 	P2P_PRE_TX_PROVDISC_PROCESS_WK = 2,
 	P2P_PRE_TX_NEGOREQ_PROCESS_WK = 3,
 	P2P_PRE_TX_INVITEREQ_PROCESS_WK = 4,
-	P2P_AP_P2P_CH_SWITCH_PROCESS_WK = 5,
-	P2P_RO_CH_WK = 6,
-	P2P_CANCEL_RO_CH_WK = 7,
 };
 
 #ifdef CONFIG_P2P_PS
@@ -1315,6 +1321,12 @@ enum P2P_PS_MODE {
 
 #define IP_MCAST_MAC(mac)		((mac[0] == 0x01) && (mac[1] == 0x00) && (mac[2] == 0x5e))
 #define ICMPV6_MCAST_MAC(mac)	((mac[0] == 0x33) && (mac[1] == 0x33) && (mac[2] != 0xff))
+
+enum RTW_ROCH_WK_ID{
+	ROCH_RO_CH_WK,
+	ROCH_CANCEL_RO_CH_WK,
+	ROCH_AP_ROCH_CH_SWITCH_PROCESS_WK,
+};
 
 #ifdef CONFIG_IOCTL_CFG80211
 /* Regulatroy Domain */

@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2017  Realtek Corporation.
@@ -27,7 +26,7 @@
 #ifndef __ODM_INTERFACE_H__
 #define __ODM_INTERFACE_H__
 
-#define INTERFACE_VERSION "1.2"
+#define INTERFACE_VERSION "1.3"
 
 #define pdm_set_reg odm_set_bb_reg
 
@@ -49,6 +48,7 @@ enum phydm_h2c_cmd {
 	PHYDM_H2C_MCC			= 0x4f,
 	PHYDM_H2C_RESP_TX_PATH_CTRL	= 0x50,
 	PHYDM_H2C_RESP_TX_ANT_CTRL	= 0x51,
+	PHYDM_H2C_FW_DM_CTRL		= 0x55,
 	ODM_MAX_H2CCMD
 };
 
@@ -92,21 +92,6 @@ enum phydm_halmac_param {
 #define _reg_ic(_name, _ic)		ODM_##_name##_ic
 #define _bit_all(_name)			BIT_##_name
 #define _bit_ic(_name, _ic)		BIT_##_name##_ic
-
-/* @_cat: implemented by Token-Pasting Operator. */
-#if 0
-#define _cat(_name, _ic_type, _func) \
-	(                            \
-		_func##_all(_name))
-#endif
-
-#if 0
-
-#define ODM_REG_DIG_11N		0xC50
-#define ODM_REG_DIG_11AC	0xDDD
-
-ODM_REG(DIG,_pdm_odm)
-#endif
 
 #if defined(DM_ODM_CE_MAC80211)
 #define ODM_BIT(name, dm)				\
@@ -195,6 +180,10 @@ void odm_set_rf_reg(struct dm_struct *dm, u8 e_rf_path, u32 reg_addr,
 
 u32 odm_get_rf_reg(struct dm_struct *dm, u8 e_rf_path, u32 reg_addr,
 		   u32 bit_mask);
+
+u16 odm_convert_to_le16(u16 value);
+
+u32 odm_convert_to_le32(u32 value);
 
 /*@
  * Memory Relative Function.
@@ -310,9 +299,8 @@ void odm_efuse_logical_map_read(struct dm_struct *dm, u8 type, u16 offset,
 enum hal_status
 odm_iq_calibrate_by_fw(struct dm_struct *dm, u8 clear, u8 segment);
 
-void odm_cmn_info_ptr_array_hook(struct dm_struct *dm,
-				 enum odm_cmninfo cmn_info, u16 index,
-				 void *value);
+enum hal_status
+odm_dpk_by_fw(struct dm_struct *dm);
 
 void phydm_cmn_sta_info_hook(struct dm_struct *dm, u8 index,
 			     struct cmn_sta_info *pcmn_sta_info);
@@ -324,15 +312,6 @@ void phydm_add_interrupt_mask_handler(struct dm_struct *dm, u8 interrupt_type);
 
 void phydm_enable_rx_related_interrupt_handler(struct dm_struct *dm);
 
-#if 0
-boolean
-phydm_get_txbf_en(
-	struct dm_struct		*dm,
-	u16		mac_id,
-	u8		i
-);
-#endif
-
 void phydm_iqk_wait(struct dm_struct *dm, u32 timeout);
 u8 phydm_get_hwrate_to_mrate(struct dm_struct *dm, u8 rate);
 
@@ -342,6 +321,12 @@ void phydm_run_in_thread_cmd(struct dm_struct *dm, void (*func)(void *),
 u8 phydm_get_tx_rate(struct dm_struct *dm);
 u8 phydm_get_tx_power_dbm(struct dm_struct *dm, u8 rf_path,
 					u8 rate, u8 bandwidth, u8 channel);
+
+s16 phydm_get_tx_power_mdbm(struct dm_struct *dm, u8 rf_path,
+					u8 rate, u8 bandwidth, u8 channel);
+
+u32 phydm_rfe_ctrl_gpio(struct dm_struct *dm, u8 gpio_num);
+
 u64 phydm_division64(u64 x, u64 y);
 
 #endif /* @__ODM_INTERFACE_H__ */

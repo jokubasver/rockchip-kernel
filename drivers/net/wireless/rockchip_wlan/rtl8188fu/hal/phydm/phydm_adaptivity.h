@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2017  Realtek Corporation.
@@ -27,17 +26,17 @@
 #ifndef __PHYDMADAPTIVITY_H__
 #define __PHYDMADAPTIVITY_H__
 
-#define ADAPTIVITY_VERSION "9.6.07" /*@20181107 changed by Kevin,
-				     *remove pwdB mode with non-adaptivity case
+#define ADAPTIVITY_VERSION "9.7.08" /*@20210121 changed by Archer,
+				     *add dynamic th_l2h_ini
 				     */
-
-#define PWDB_UPPER_BOUND 7
-#define DFIR_LOSS 7
 #define ADC_BACKOFF 12
-#define EDCCA_TH_L2H_LB 0x30
+#define EDCCA_TH_L2H_LB 48
 #define TH_L2H_DIFF_IGI 8
 #define EDCCA_HL_DIFF_NORMAL 8
-
+#define IGI_2_DBM(igi) (igi - 110)
+#define L2H_INI_RECORD_NUM 4
+#define L2H_INI_LIMIT_PERIOD 60 /*60 sec*/
+/*@ [PHYDM-337][Old IC] EDCCA TH = IGI + REG setting*/
 #define ODM_IC_PWDB_EDCCA (ODM_RTL8188E | ODM_RTL8723B | ODM_RTL8192E |\
 			   ODM_RTL8881A | ODM_RTL8821 | ODM_RTL8812)
 
@@ -57,6 +56,20 @@ enum phydm_regulation_type {
 	MAX_REGULATION_NUM	= 4
 };
 #endif
+struct phydm_l2h_ini_recorder_strcut {
+	u8		l2h_ini_bitmap; /*@Don't add any new parameter before this*/
+	s8		l2h_ini_hist[L2H_INI_RECORD_NUM];
+	u32		low_rate_tx_fail_hist[L2H_INI_RECORD_NUM];
+	u8		damping_limit_en;
+	s8		damping_limit_val; /*@Limit l2h_ini_dyn_max*/
+	u32		limit_time;
+	u32		limit_low_rate_tx_fail;
+};
+
+enum phydm_edcca_mode {
+	PHYDM_EDCCA_NORMAL_MODE = 0,
+	PHYDM_EDCCA_ADAPT_MODE = 1
+};
 
 enum phydm_adapinfo {
 	PHYDM_ADAPINFO_CARRIER_SENSE_ENABLE = 0,
@@ -64,7 +77,8 @@ enum phydm_adapinfo {
 	PHYDM_ADAPINFO_TH_EDCCA_HL_DIFF,
 	PHYDM_ADAPINFO_AP_NUM_TH,
 	PHYDM_ADAPINFO_DOMAIN_CODE_2G,
-	PHYDM_ADAPINFO_DOMAIN_CODE_5G
+	PHYDM_ADAPINFO_DOMAIN_CODE_5G,
+	PHYDM_ADAPINFO_SWITCH_TH_L2H_INI_IN_BAND
 };
 
 enum phydm_mac_edcca_type {
@@ -72,35 +86,42 @@ enum phydm_mac_edcca_type {
 	PHYDM_DONT_IGNORE_EDCCA		= 1
 };
 
-enum phydm_adaptivity_mode {
+enum phydm_adaptivity_debug_mode {
 	PHYDM_ADAPT_MSG			= 0,
 	PHYDM_ADAPT_DEBUG		= 1,
 	PHYDM_ADAPT_RESUME		= 2,
-	PHYDM_EDCCA_TH_PAUSE		= 3,
-	PHYDM_EDCCA_TH_RESUME		= 4
+	PHYDM_L2H_INI_DEBUG		= 3
 };
 
 struct phydm_adaptivity_struct {
+	struct phydm_l2h_ini_recorder_strcut l2h_ini_recorder_t;
+	u32			low_rate_tx_fail_th[3];
+	u32			rts_drop_limit_time;
+	s8			l2h_ini_range_max;	/*@l2h_ini_dynamic_max*/
+	s8			l2h_ini_range_min;	/*@l2h_ini_dynamic_min*/
+	boolean		rts_drop_en;
+	boolean		is_dbg_low_rate_tx_fail_th;
+	boolean		is_adapt_by_dig;
+	boolean			mode_cvrt_en;
 	s8			th_l2h_ini_backup;
 	s8			th_edcca_hl_diff_backup;
 	s8			igi_base;
 	s8			h2l_lb;
 	s8			l2h_lb;
 	u8			ap_num_th;
-	u8			adjust_l2h;
+	u8			l2h_dyn_min;
 	u32			adaptivity_dbg_port; /*N:0x208, AC:0x209*/
 	u8			debug_mode;
 	u16			igi_up_bound_lmt_cnt;	/*@When igi_up_bound_lmt_cnt !=0, limit IGI upper bound to "adapt_igi_up"*/
 	u16			igi_up_bound_lmt_val;	/*@max value of igi_up_bound_lmt_cnt*/
 	boolean			igi_lmt_en;
 	u8			adapt_igi_up;
-	u32			rvrt_val[2];
+	u32			rvrt_val[2]; /*@all rvrt_val for pause API must set to u32*/
 	s8			th_l2h;
 	s8			th_h2l;
 	u8			regulation_2g;
 	u8			regulation_5g;
-	boolean			is_adapt_en;
-	boolean			edcca_en;
+	u8			switch_th_l2h_ini_in_band;
 };
 
 #ifdef PHYDM_SUPPORT_ADAPTIVITY
@@ -110,7 +131,7 @@ void phydm_adaptivity_debug(void *dm_void, char input[][16], u32 *_used,
 void phydm_set_edcca_val(void *dm_void, u32 *val_buf, u8 val_len);
 #endif
 
-void phydm_set_edcca_threshold_api(void *dm_void, u8 IGI);
+void phydm_set_edcca_threshold_api(void *dm_void);
 
 void phydm_adaptivity_info_init(void *dm_void, enum phydm_adapinfo cmn_info,
 				u32 value);

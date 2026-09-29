@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2016 - 2017 Realtek Corporation.
@@ -74,6 +73,17 @@
 	#if defined(CONFIG_RTL8822C)
 		#include "rtl8822c/HalEfuseMask8822C_USB.h"
 	#endif
+	#if defined(CONFIG_RTL8814B)
+		#include "rtl8814b/HalEfuseMask8814B_USB.h"
+	#endif
+
+	#if defined(CONFIG_RTL8723F)
+		#include "rtl8723f/HalEfuseMask8723F_USB.h"
+	#endif
+
+	#if defined(CONFIG_RTL8822E)
+		#include "rtl8822e/HalEfuseMask8822E_USB.h"
+	#endif
 #endif /*CONFIG_USB_HCI*/
 
 #ifdef CONFIG_PCI_HCI
@@ -121,6 +131,12 @@
 	#endif
 	#if defined(CONFIG_RTL8822C)
 		#include "rtl8822c/HalEfuseMask8822C_PCIE.h"
+	#endif
+	#if defined(CONFIG_RTL8814B)
+		#include "rtl8814b/HalEfuseMask8814B_PCIE.h"
+	#endif
+	#if defined(CONFIG_RTL8822E)
+		#include "rtl8822e/HalEfuseMask8822E_PCIE.h"
 	#endif
 #endif /*CONFIG_PCI_HCI*/
 #ifdef CONFIG_SDIO_HCI
@@ -173,4 +189,11 @@
 		#include "rtl8822c/HalEfuseMask8822C_SDIO.h"
 	#endif
 
+	#if defined(CONFIG_RTL8723F)
+		#include "rtl8723f/HalEfuseMask8723F_SDIO.h"
+	#endif
+
+	#if defined(CONFIG_RTL8822E)
+		#include "rtl8822e/HalEfuseMask8822E_SDIO.h"
+	#endif
 #endif /*CONFIG_SDIO_HCI*/

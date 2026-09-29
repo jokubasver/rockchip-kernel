@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2017  Realtek Corporation.
@@ -252,6 +251,8 @@ odm_config_rf_with_header_file(struct dm_struct *dm,
 				READ_AND_CONFIG_MP(8822b, _txpwr_lmt_type17);
 			else if (dm->rfe_type == 18)
 				READ_AND_CONFIG_MP(8822b, _txpwr_lmt_type18);
+			//else if (dm->rfe_type == 19)
+				//READ_AND_CONFIG_MP(8822b, _txpwr_lmt_type19);
 			else
 				READ_AND_CONFIG_MP(8822b, _txpwr_lmt);
 		}
@@ -351,10 +352,25 @@ odm_config_rf_with_header_file(struct dm_struct *dm,
 		if (config_type == CONFIG_RF_RADIO) {
 			if (e_rf_path == RF_PATH_A)
 				READ_AND_CONFIG_MP(8721d, _radioa);
-		} else if (config_type == CONFIG_RF_TXPWR_LMT)
-			READ_AND_CONFIG_MP(8721d, _txpwr_lmt);
+		} else if (config_type == CONFIG_RF_TXPWR_LMT) {
+			if (dm->power_voltage == ODM_POWER_18V)
+				READ_AND_CONFIG_MP(8721d, _txpwr_lmt_type0);
+			else
+				READ_AND_CONFIG_MP(8721d, _txpwr_lmt_type1);
+		}
 	}
 #endif
+
+#if (RTL8710C_SUPPORT == 1)
+	if (dm->support_ic_type == ODM_RTL8710C) {
+		if (config_type == CONFIG_RF_RADIO) {
+			if (e_rf_path == RF_PATH_A)
+				READ_AND_CONFIG_MP(8710c, _radioa);
+		} else if (config_type == CONFIG_RF_TXPWR_LMT)
+			READ_AND_CONFIG_MP(8710c, _txpwr_lmt);
+	}
+#endif
+
 #if (RTL8821C_SUPPORT == 1)
 	if (dm->support_ic_type == ODM_RTL8821C) {
 		if (config_type == CONFIG_RF_RADIO) {
@@ -366,18 +382,14 @@ odm_config_rf_with_header_file(struct dm_struct *dm,
 	}
 #endif
 #if (RTL8195B_SUPPORT == 1)
-	if (dm->support_ic_type == ODM_RTL8195B) {
-		if (config_type == CONFIG_RF_RADIO) {
-			if (e_rf_path == RF_PATH_A)
-				READ_AND_CONFIG(8195b, _radioa);
-		}
-		#if 0
-		else if (config_type == CONFIG_RF_TXPWR_LMT) {
-			READ_AND_CONFIG(8821c, _txpwr_lmt);
-			/*@*/
-		}
-		#endif
-	}
+        if (dm->support_ic_type == ODM_RTL8195B) {
+            if (config_type == CONFIG_RF_RADIO) {
+                if (e_rf_path == RF_PATH_A)
+                    READ_AND_CONFIG(8195b, _radioa);
+                } else if (config_type == CONFIG_RF_TXPWR_LMT) {
+                    READ_AND_CONFIG(8195b, _txpwr_lmt);
+                }
+        }
 #endif
 #if (RTL8198F_SUPPORT == 1)
 	if (dm->support_ic_type == ODM_RTL8198F) {
@@ -393,21 +405,6 @@ odm_config_rf_with_header_file(struct dm_struct *dm,
 		}
 	}
 #endif
-/*#if (RTL8814B_SUPPORT == 1)
-	if (dm->support_ic_type == ODM_RTL8814B) {
-		if (config_type == CONFIG_RF_RADIO) {
-			if (e_rf_path == RF_PATH_A)
-				READ_AND_CONFIG_MP(8814b, _radioa);
-			else if (e_rf_path == RF_PATH_B)
-				READ_AND_CONFIG_MP(8814b, _radiob);
-			else if (e_rf_path == RF_PATH_C)
-				READ_AND_CONFIG_MP(8814b, _radioc);
-			else if (e_rf_path == RF_PATH_D)
-				READ_AND_CONFIG_MP(8814b, _radiod);
-		}
-	}
-#endif
-*/
 #if (RTL8822C_SUPPORT)
 	if (dm->support_ic_type == ODM_RTL8822C) {
 		if (config_type == CONFIG_RF_RADIO) {
@@ -416,9 +413,59 @@ odm_config_rf_with_header_file(struct dm_struct *dm,
 			else if (e_rf_path == RF_PATH_B)
 				READ_AND_CONFIG_MP(8822c, _radiob);
 		} else if (config_type == CONFIG_RF_TXPWR_LMT) {
-			READ_AND_CONFIG_MP(8822c, _txpwr_lmt);
+			if (dm->rfe_type == 5)
+				READ_AND_CONFIG_MP(8822c, _txpwr_lmt_type5);
+			else
+				READ_AND_CONFIG_MP(8822c, _txpwr_lmt);
 		}
 	}
+#endif
+#if (RTL8723F_SUPPORT)
+		if (dm->support_ic_type == ODM_RTL8723F) {
+			if (config_type == CONFIG_RF_RADIO) {
+				if (e_rf_path == RF_PATH_A)
+					READ_AND_CONFIG_MP(8723f, _radioa);
+				else if (e_rf_path == RF_PATH_B)
+					READ_AND_CONFIG_MP(8723f, _radiob);
+			} else if (config_type == CONFIG_RF_TXPWR_LMT) {
+				READ_AND_CONFIG_MP(8723f, _txpwr_lmt);
+			}
+		}
+#endif
+#if (RTL8735B_SUPPORT)
+		if (dm->support_ic_type == ODM_RTL8735B) {
+			if (config_type == CONFIG_RF_RADIO) {
+				if (e_rf_path == RF_PATH_A)
+					READ_AND_CONFIG_MP(8735b, _radioa);
+			} else if (config_type == CONFIG_RF_TXPWR_LMT) {
+				READ_AND_CONFIG_MP(8735b, _txpwr_lmt);
+			}
+		}
+#endif
+#if (RTL8730A_SUPPORT)
+		if (dm->support_ic_type == ODM_RTL8730A) {
+			if (config_type == CONFIG_RF_RADIO) {
+				if (e_rf_path == RF_PATH_A)
+					READ_AND_CONFIG_MP(8730a, _radioa);
+			} else if (config_type == CONFIG_RF_TXPWR_LMT) {
+				READ_AND_CONFIG_MP(8730a, _txpwr_lmt);
+			}
+		}
+#endif
+#if (RTL8822E_SUPPORT)
+		if (dm->support_ic_type == ODM_RTL8822E) {
+			if (config_type == CONFIG_RF_RADIO) {
+				if (e_rf_path == RF_PATH_A)
+					READ_AND_CONFIG_MP(8822e, _radioa);
+				else if (e_rf_path == RF_PATH_B)
+					READ_AND_CONFIG_MP(8822e, _radiob);
+			} else if (config_type == CONFIG_RF_TXPWR_LMT) {
+				//if (dm->rfe_type == 5)
+					//READ_AND_CONFIG_MP(8822e, _txpwr_lmt_type5);
+				//else
+					READ_AND_CONFIG_MP(8822e, _txpwr_lmt);
+			}
+		}
 #endif
 #if (RTL8812F_SUPPORT)
 	if (dm->support_ic_type == ODM_RTL8812F) {
@@ -430,9 +477,19 @@ odm_config_rf_with_header_file(struct dm_struct *dm,
 		}
 	}
 #endif
+#if (RTL8197G_SUPPORT)
+	if (dm->support_ic_type == ODM_RTL8197G) {
+		if (config_type == CONFIG_RF_RADIO) {
+			if (e_rf_path == RF_PATH_A)
+				READ_AND_CONFIG_MP(8197g, _radioa);
+			else if (e_rf_path == RF_PATH_B)
+				READ_AND_CONFIG_MP(8197g, _radiob);
+		}
+	}
+#endif
 
- /*8814B need review, when phydm has related files*/
- #if (RTL8814B_SUPPORT)
+/*8814B need review, when phydm has related files*/
+#if (RTL8814B_SUPPORT)
 	if (dm->support_ic_type == ODM_RTL8814B) {
 		if (config_type == CONFIG_RF_RADIO) {
 			if (e_rf_path == RF_PATH_A)
@@ -449,9 +506,33 @@ odm_config_rf_with_header_file(struct dm_struct *dm,
 				READ_AND_CONFIG_MP(8814b, _radiosyn0);
 			else if (e_rf_path == RF_SYN1)
 				READ_AND_CONFIG_MP(8814b, _radiosyn1);
+		} else if (config_type == CONFIG_RF_TXPWR_LMT) {
+			READ_AND_CONFIG_MP(8814b, _txpwr_lmt);
 		}
 	}
-  #endif
+#endif
+#if (RTL8814C_SUPPORT)
+	if (dm->support_ic_type == ODM_RTL8814C) {
+		if (config_type == CONFIG_RF_RADIO) {
+			if (e_rf_path == RF_PATH_A)
+				READ_AND_CONFIG_MP(8814c, _radioa);
+			else if (e_rf_path == RF_PATH_B)
+				READ_AND_CONFIG_MP(8814c, _radiob);
+			else if (e_rf_path == RF_PATH_C)
+				READ_AND_CONFIG_MP(8814c, _radioc);
+			else if (e_rf_path == RF_PATH_D)
+				READ_AND_CONFIG_MP(8814c, _radiod);
+		}
+		if (config_type == CONFIG_RF_SYN_RADIO) {
+			if (e_rf_path == RF_SYN0)
+				READ_AND_CONFIG_MP(8814c, _radiosyn0);
+			else if (e_rf_path == RF_SYN1)
+				READ_AND_CONFIG_MP(8814c, _radiosyn1);
+		} else if (config_type == CONFIG_RF_TXPWR_LMT) {
+			READ_AND_CONFIG_MP(8814c, _txpwr_lmt);
+		}
+	}
+#endif
 
 	if (config_type == CONFIG_RF_RADIO) {
 		if (dm->fw_offload_ability & PHYDM_PHY_PARAM_OFFLOAD) {
@@ -641,6 +722,8 @@ odm_config_rf_with_tx_pwr_track_header_file(struct dm_struct *dm)
 			READ_AND_CONFIG_MP(8822b, _txpowertrack_type17);
 		else if (dm->rfe_type == 18)
 			READ_AND_CONFIG_MP(8822b, _txpowertrack_type18);
+		//else if (dm->rfe_type == 19)
+			//READ_AND_CONFIG_MP(8822b, _txpowertrack_type19);
 		else
 			READ_AND_CONFIG_MP(8822b, _txpowertrack);
 	}
@@ -741,6 +824,20 @@ odm_config_rf_with_tx_pwr_track_header_file(struct dm_struct *dm)
 		READ_AND_CONFIG_MP(8721d, _txxtaltrack);
 	}
 #endif
+
+#if RTL8710C_SUPPORT
+	if (dm->support_ic_type == ODM_RTL8710C) {
+		#if 0
+		if (dm->package_type == 1)
+			READ_AND_CONFIG_MP(8710c, _txpowertrack_qfn48m_smic);
+		else if (dm->package_type == 5)
+			READ_AND_CONFIG_MP(8710c, _txpowertrack_qfn48m_umc);
+		#endif
+		READ_AND_CONFIG_MP(8710c, _txpowertrack);
+		READ_AND_CONFIG_MP(8710c, _txxtaltrack);
+	}
+#endif
+
 #if RTL8821C_SUPPORT
 	if (dm->support_ic_type == ODM_RTL8821C) {
 		if (dm->rfe_type == 0x5)
@@ -758,6 +855,8 @@ odm_config_rf_with_tx_pwr_track_header_file(struct dm_struct *dm)
 			READ_AND_CONFIG_MP(8198f, _txpowertrack_type0);
 		else if (dm->rfe_type == 1)
 			READ_AND_CONFIG_MP(8198f, _txpowertrack_type1);
+		else if (dm->rfe_type == 3)
+			READ_AND_CONFIG_MP(8198f, _txpowertrack_type3);
 		else
 			READ_AND_CONFIG_MP(8198f, _txpowertrack);
 		}
@@ -765,24 +864,114 @@ odm_config_rf_with_tx_pwr_track_header_file(struct dm_struct *dm)
 
 #if RTL8195B_SUPPORT
 	if (dm->support_ic_type == ODM_RTL8195B) {
-		READ_AND_CONFIG_MP(8195b, _txpowertrack);
-		READ_AND_CONFIG_MP(8195b, _txxtaltrack);
+		if (dm->package_type == 1) {
+			READ_AND_CONFIG_MP(8195b, _txpowertrack_pkg1);
+			READ_AND_CONFIG_MP(8195b, _txxtaltrack_pkg1);
+		} else {
+			READ_AND_CONFIG_MP(8195b, _txpowertrack);
+			READ_AND_CONFIG_MP(8195b, _txxtaltrack);
+		}
 	}
 #endif
 
 #if (RTL8822C_SUPPORT)
-	if (dm->support_ic_type == ODM_RTL8822C)
-		READ_AND_CONFIG_MP(8822c, _txpowertrack);
+	if (dm->support_ic_type == ODM_RTL8822C) {
+		if (dm->en_tssi_mode)
+			READ_AND_CONFIG_MP(8822c, _txpowertracktssi);
+		else
+			READ_AND_CONFIG_MP(8822c, _txpowertrack);
+	}
+#endif
+
+#if (RTL8723F_SUPPORT)
+	if (dm->support_ic_type == ODM_RTL8723F) {
+		if (dm->en_tssi_mode)
+			READ_AND_CONFIG_MP(8723f, _txpowertracktssi);
+		else
+			READ_AND_CONFIG_MP(8723f, _txpowertrack);
+		READ_AND_CONFIG_MP(8723f, _txxtaltrack);
+	}
+#endif
+
+#if (RTL8735B_SUPPORT)
+	if (dm->support_ic_type == ODM_RTL8735B) {
+		if (dm->en_tssi_mode)
+			READ_AND_CONFIG_MP(8735b, _txpowertracktssi);
+		else
+			READ_AND_CONFIG_MP(8735b, _txpowertrack);
+		READ_AND_CONFIG_MP(8735b, _txxtaltrack);
+	}
+#endif
+
+#if (RTL8730A_SUPPORT)
+	if (dm->support_ic_type == ODM_RTL8730A) {
+		if (dm->en_tssi_mode)
+			READ_AND_CONFIG_MP(8730a, _txpowertracktssi);
+		else
+			READ_AND_CONFIG_MP(8730a, _txpowertrack);
+		READ_AND_CONFIG_MP(8730a, _txxtaltrack);
+	}
+#endif
+
+#if (RTL8822E_SUPPORT)
+		if (dm->support_ic_type == ODM_RTL8822E) {
+			READ_AND_CONFIG_MP(8822e, _txpowertrack);
+		}
 #endif
 
 #if (RTL8812F_SUPPORT)
-	if (dm->support_ic_type == ODM_RTL8812F)
-		READ_AND_CONFIG_MP(8812f, _txpowertrack);
+	if (dm->support_ic_type == ODM_RTL8812F) {
+		if (dm->rfe_type == 0)
+			READ_AND_CONFIG_MP(8812f, _txpowertrack_type0);
+		else if (dm->rfe_type == 1)
+			READ_AND_CONFIG_MP(8812f, _txpowertrack_type1);
+		else if (dm->rfe_type == 2)
+			READ_AND_CONFIG_MP(8812f, _txpowertrack_type2);
+		else if (dm->rfe_type == 3)
+			READ_AND_CONFIG_MP(8812f, _txpowertrack_type3);
+		else if (dm->rfe_type == 4)
+			READ_AND_CONFIG_MP(8812f, _txpowertrack_type4);
+		else if (dm->rfe_type == 5)
+			READ_AND_CONFIG_MP(8812f, _txpowertrack_type5);
+		else
+			READ_AND_CONFIG_MP(8812f, _txpowertrack);
+	}
 #endif
 
-#if RTL8814B_SUPPORT
-		if (dm->support_ic_type == ODM_RTL8814B)
+#if (RTL8197G_SUPPORT)
+	if (dm->support_ic_type == ODM_RTL8197G)
+		READ_AND_CONFIG_MP(8197g, _txpowertrack);
+#endif
+
+#if (RTL8814B_SUPPORT)
+	if (dm->support_ic_type == ODM_RTL8814B) {
+		if (dm->rfe_type == 0)
+			READ_AND_CONFIG_MP(8814b, _txpowertrack_type0);
+		else if (dm->rfe_type == 1)
+			READ_AND_CONFIG_MP(8814b, _txpowertrack_type1);
+		else if (dm->rfe_type == 2)
+			READ_AND_CONFIG_MP(8814b, _txpowertrack_type2);
+#if 0
+		else if (dm->rfe_type == 3)
+			READ_AND_CONFIG_MP(8814b, _txpowertrack_type3);
+		else if (dm->rfe_type == 6)
+			READ_AND_CONFIG_MP(8814b, _txpowertrack_type6);
+#endif
+		else
 			READ_AND_CONFIG_MP(8814b, _txpowertrack);
+	}
+#endif
+#if (RTL8814C_SUPPORT)
+	if (dm->support_ic_type == ODM_RTL8814C) {
+		if (dm->rfe_type == 0)
+			READ_AND_CONFIG_MP(8814c, _txpowertrack_type0);
+		else if (dm->rfe_type == 1)
+			READ_AND_CONFIG_MP(8814c, _txpowertrack_type1);
+		else if (dm->rfe_type == 2)
+			READ_AND_CONFIG_MP(8814c, _txpowertrack_type2);
+		else
+			READ_AND_CONFIG_MP(8814c, _txpowertrack);
+	}
 #endif
 
 	return HAL_STATUS_SUCCESS;
@@ -993,6 +1182,8 @@ odm_config_bb_with_header_file(struct dm_struct *dm,
 				READ_AND_CONFIG_MP(8822b, _phy_reg_pg_type17);
 			else if (dm->rfe_type == 18)
 				READ_AND_CONFIG_MP(8822b, _phy_reg_pg_type18);
+			//else if (dm->rfe_type == 19)
+				//READ_AND_CONFIG_MP(8822b, _phy_reg_pg_type19);
 			else
 				READ_AND_CONFIG_MP(8822b, _phy_reg_pg);
 		}
@@ -1092,10 +1283,26 @@ odm_config_bb_with_header_file(struct dm_struct *dm,
 			READ_AND_CONFIG_MP(8721d, _phy_reg);
 		else if (config_type == CONFIG_BB_AGC_TAB)
 			READ_AND_CONFIG_MP(8721d, _agc_tab);
-		else if (config_type == CONFIG_BB_PHY_REG_PG)
-			READ_AND_CONFIG_MP(8721d, _phy_reg_pg);
+		else if (config_type == CONFIG_BB_PHY_REG_PG) {
+			if (dm->power_voltage == ODM_POWER_18V)
+				READ_AND_CONFIG_MP(8721d, _phy_reg_pg_type0);
+			else
+				READ_AND_CONFIG_MP(8721d, _phy_reg_pg_type1);
+		}
 	}
 #endif
+
+#if (RTL8710C_SUPPORT == 1)
+	if (dm->support_ic_type == ODM_RTL8710C) {
+		if (config_type == CONFIG_BB_PHY_REG)
+			READ_AND_CONFIG_MP(8710c, _phy_reg);
+		else if (config_type == CONFIG_BB_AGC_TAB)
+			READ_AND_CONFIG_MP(8710c, _agc_tab);
+		else if (config_type == CONFIG_BB_PHY_REG_PG)
+			READ_AND_CONFIG_MP(8710c, _phy_reg_pg);
+	}
+#endif
+
 #if (RTL8821C_SUPPORT == 1)
 	if (dm->support_ic_type == ODM_RTL8821C) {
 		if (config_type == CONFIG_BB_PHY_REG) {
@@ -1135,12 +1342,18 @@ odm_config_bb_with_header_file(struct dm_struct *dm,
 #endif
 #if (RTL8195B_SUPPORT == 1)
 	if (dm->support_ic_type == ODM_RTL8195B) {
-		if (config_type == CONFIG_BB_PHY_REG)
+		if (config_type == CONFIG_BB_PHY_REG) {
 			READ_AND_CONFIG(8195b, _phy_reg);
-		else if (config_type == CONFIG_BB_AGC_TAB)
+		} else if (config_type == CONFIG_BB_AGC_TAB) {
 			READ_AND_CONFIG(8195b, _agc_tab);
-		else if (config_type == CONFIG_BB_PHY_REG_PG)
+		} else if (config_type == CONFIG_BB_PHY_REG_PG) {
 			READ_AND_CONFIG(8195b, _phy_reg_pg);
+		} else if (config_type == CONFIG_BB_PHY_REG_MP) {
+			if (dm->package_type == 1)
+				odm_set_bb_reg(dm, R_0xaa8, 0x1f0000, 0x10);
+			else
+				odm_set_bb_reg(dm, R_0xaa8, 0x1f0000, 0x12);
+		}
 	}
 #endif
 #if (RTL8198F_SUPPORT == 1)
@@ -1157,8 +1370,26 @@ odm_config_bb_with_header_file(struct dm_struct *dm,
 			READ_AND_CONFIG_MP(8814b, _phy_reg);
 		else if (config_type == CONFIG_BB_AGC_TAB)
 			READ_AND_CONFIG_MP(8814b, _agc_tab);
-		else if (config_type == CONFIG_BB_PHY_REG_PG)
-			READ_AND_CONFIG(8814b, _phy_reg_pg);
+		else if (config_type == CONFIG_BB_PHY_REG_PG) {
+			if (dm->rfe_type == 1)
+				READ_AND_CONFIG(8814b, _phy_reg_pg_type1);
+			else
+				READ_AND_CONFIG(8814b, _phy_reg_pg);
+		}
+	}
+#endif
+#if (RTL8814C_SUPPORT == 1)
+	if (dm->support_ic_type == ODM_RTL8814C) {
+		if (config_type == CONFIG_BB_PHY_REG)
+			READ_AND_CONFIG_MP(8814c, _phy_reg);
+		else if (config_type == CONFIG_BB_AGC_TAB)
+			READ_AND_CONFIG_MP(8814c, _agc_tab);
+		else if (config_type == CONFIG_BB_PHY_REG_PG) {
+			if (dm->rfe_type == 1)
+				READ_AND_CONFIG(8814c, _phy_reg_pg_type1);
+			else
+				READ_AND_CONFIG(8814c, _phy_reg_pg);
+		}
 	}
 #endif
 #if (RTL8822C_SUPPORT)
@@ -1171,6 +1402,46 @@ odm_config_bb_with_header_file(struct dm_struct *dm,
 			READ_AND_CONFIG(8822c, _phy_reg_pg);
 	}
 #endif
+#if (RTL8723F_SUPPORT)
+		if (dm->support_ic_type == ODM_RTL8723F) {
+			if (config_type == CONFIG_BB_PHY_REG)
+				READ_AND_CONFIG_MP(8723f, _phy_reg);
+			else if (config_type == CONFIG_BB_AGC_TAB)
+				READ_AND_CONFIG_MP(8723f, _agc_tab);
+			else if (config_type == CONFIG_BB_PHY_REG_PG)
+				READ_AND_CONFIG(8723f, _phy_reg_pg);
+		}
+#endif
+#if (RTL8735B_SUPPORT)
+		if (dm->support_ic_type == ODM_RTL8735B) {
+			if (config_type == CONFIG_BB_PHY_REG)
+				READ_AND_CONFIG_MP(8735b, _phy_reg);
+			else if (config_type == CONFIG_BB_AGC_TAB)
+				READ_AND_CONFIG_MP(8735b, _agc_tab);
+			else if (config_type == CONFIG_BB_PHY_REG_PG)
+				READ_AND_CONFIG(8735b, _phy_reg_pg);
+		}
+#endif
+#if (RTL8730A_SUPPORT)
+		if (dm->support_ic_type == ODM_RTL8730A) {
+			if (config_type == CONFIG_BB_PHY_REG)
+				READ_AND_CONFIG_MP(8730a, _phy_reg);
+			else if (config_type == CONFIG_BB_AGC_TAB)
+				READ_AND_CONFIG_MP(8730a, _agc_tab);
+			else if (config_type == CONFIG_BB_PHY_REG_PG)
+				READ_AND_CONFIG(8730a, _phy_reg_pg);
+		}
+#endif
+#if (RTL8822E_SUPPORT)
+		if (dm->support_ic_type == ODM_RTL8822E) {
+			if (config_type == CONFIG_BB_PHY_REG)
+				READ_AND_CONFIG_MP(8822e, _phy_reg);
+			else if (config_type == CONFIG_BB_AGC_TAB)
+				READ_AND_CONFIG_MP(8822e, _agc_tab);
+			else if (config_type == CONFIG_BB_PHY_REG_PG)
+				READ_AND_CONFIG(8822e, _phy_reg_pg);
+		}
+#endif
 #if (RTL8812F_SUPPORT)
 	if (dm->support_ic_type == ODM_RTL8812F) {
 		if (config_type == CONFIG_BB_PHY_REG)
@@ -1179,6 +1450,16 @@ odm_config_bb_with_header_file(struct dm_struct *dm,
 			READ_AND_CONFIG_MP(8812f, _agc_tab);
 		else if (config_type == CONFIG_BB_PHY_REG_PG)
 			READ_AND_CONFIG(8812f, _phy_reg_pg);
+	}
+#endif
+#if (RTL8197G_SUPPORT)
+	if (dm->support_ic_type == ODM_RTL8197G) {
+		if (config_type == CONFIG_BB_PHY_REG)
+			READ_AND_CONFIG_MP(8197g, _phy_reg);
+		else if (config_type == CONFIG_BB_AGC_TAB)
+			READ_AND_CONFIG_MP(8197g, _agc_tab);
+		else if (config_type == CONFIG_BB_PHY_REG_PG)
+			READ_AND_CONFIG(8197g, _phy_reg_pg);
 	}
 #endif
 
@@ -1210,6 +1491,13 @@ odm_config_mac_with_header_file(struct dm_struct *dm)
 		  "support_platform: 0x%X, support_interface: 0x%X, board_type: 0x%X\n",
 		  dm->support_platform, dm->support_interface, dm->board_type);
 
+#ifdef PHYDM_IC_HALMAC_PARAM_SUPPORT
+	if (dm->support_ic_type & PHYDM_IC_SUPPORT_HALMAC_PARAM_OFFLOAD) {
+		PHYDM_DBG(dm, ODM_COMP_INIT, "MAC para-package in HALMAC\n");
+		return result;
+	}
+#endif
+
 /* @1 AP doesn't use PHYDM initialization in these ICs */
 #if (DM_ODM_SUPPORT_TYPE != ODM_AP)
 #if (RTL8812A_SUPPORT == 1)
@@ -1228,12 +1516,12 @@ odm_config_mac_with_header_file(struct dm_struct *dm)
 	if (dm->support_ic_type == ODM_RTL8723D)
 		READ_AND_CONFIG_MP(8723d, _mac_reg);
 #endif
-/* @JJ ADD 20161014 */
 #if (RTL8710B_SUPPORT == 1)
 	if (dm->support_ic_type == ODM_RTL8710B)
 		READ_AND_CONFIG_MP(8710b, _mac_reg);
 #endif
 #endif /* @(DM_ODM_SUPPORT_TYPE !=  ODM_AP) */
+
 /* @1 All platforms support */
 #if (RTL8188E_SUPPORT == 1)
 	if (dm->support_ic_type == ODM_RTL8188E)
@@ -1263,17 +1551,20 @@ odm_config_mac_with_header_file(struct dm_struct *dm)
 	if (dm->support_ic_type == ODM_RTL8197F)
 		READ_AND_CONFIG_MP(8197f, _mac_reg);
 #endif
-
-/*@jj add 20170822*/
 #if (RTL8192F_SUPPORT == 1)
 	if (dm->support_ic_type == ODM_RTL8192F)
 		READ_AND_CONFIG_MP(8192f, _mac_reg);
 #endif
-
 #if (RTL8721D_SUPPORT == 1)
 	if (dm->support_ic_type == ODM_RTL8721D)
 		READ_AND_CONFIG_MP(8721d, _mac_reg);
 #endif
+
+#if (RTL8710C_SUPPORT == 1)
+	if (dm->support_ic_type == ODM_RTL8710C)
+		READ_AND_CONFIG_MP(8710c, _mac_reg);
+#endif
+
 #if (RTL8821C_SUPPORT == 1)
 	if (dm->support_ic_type == ODM_RTL8821C)
 		READ_AND_CONFIG(8821c, _mac_reg);
@@ -1290,19 +1581,18 @@ odm_config_mac_with_header_file(struct dm_struct *dm)
 	if (dm->support_ic_type == ODM_RTL8198F)
 		READ_AND_CONFIG_MP(8198f, _mac_reg);
 #endif
-#if (RTL8814B_SUPPORT == 1)
-	if (dm->support_ic_type == ODM_RTL8814B)
-		READ_AND_CONFIG_MP(8814b, _mac_reg);
+#if (RTL8197G_SUPPORT == 1)
+	if (dm->support_ic_type == ODM_RTL8197G)
+		READ_AND_CONFIG_MP(8197g, _mac_reg);
 #endif
-#if 0 /*(RTL8822C_SUPPORT)*/
-	if (dm->support_ic_type == ODM_RTL8822C)
-		READ_AND_CONFIG_MP(8822c, _mac_reg);
+#if (RTL8730A_SUPPORT == 1)
+	if (dm->support_ic_type == ODM_RTL8730A)
+		READ_AND_CONFIG_MP(8730a, _mac_reg);
 #endif
-#if (RTL8812F_SUPPORT)
-	if (dm->support_ic_type == ODM_RTL8812F)
-		READ_AND_CONFIG_MP(8812f, _mac_reg);
+#if (RTL8735B_SUPPORT == 1)
+	if (dm->support_ic_type == ODM_RTL8735B)
+		READ_AND_CONFIG_MP(8735b, _mac_reg);
 #endif
-
 	if (dm->fw_offload_ability & PHYDM_PHY_PARAM_OFFLOAD) {
 		result = phydm_set_reg_by_fw(dm,
 					     PHYDM_HALMAC_CMD_END,
@@ -1322,94 +1612,146 @@ u32 odm_get_hw_img_version(struct dm_struct *dm)
 {
 	u32 version = 0;
 
+	switch (dm->support_ic_type) {
 /* @1 AP doesn't use PHYDM initialization in these ICs */
 #if (DM_ODM_SUPPORT_TYPE != ODM_AP)
-#if (RTL8821A_SUPPORT == 1)
-	if (dm->support_ic_type == ODM_RTL8821)
-		version = GET_VERSION_MP(8821a, _mac_reg);
+#if (RTL8821A_SUPPORT)
+	case ODM_RTL8821:
+		version = odm_get_version_mp_8821a_phy_reg();
+		break;
 #endif
-#if (RTL8192E_SUPPORT == 1)
-	if (dm->support_ic_type == ODM_RTL8192E)
-		version = GET_VERSION_MP(8192e, _mac_reg);
+#if (RTL8192E_SUPPORT)
+	case ODM_RTL8192E:
+		version = odm_get_version_mp_8192e_phy_reg();
+		break;
 #endif
-#if (RTL8812A_SUPPORT == 1)
-	if (dm->support_ic_type == ODM_RTL8812)
-		version = GET_VERSION_MP(8812a, _mac_reg);
-#endif
-#if (RTL8723D_SUPPORT == 1)
-	if (dm->support_ic_type == ODM_RTL8723D)
-		version = GET_VERSION_MP(8723d, _mac_reg);
-#endif
-/* @JJ ADD 20161014 */
-#if (RTL8710B_SUPPORT == 1)
-	if (dm->support_ic_type == ODM_RTL8710B)
-		version = GET_VERSION_MP(8710b, _mac_reg);
+#if (RTL8812A_SUPPORT)
+	case ODM_RTL8812:
+		version = odm_get_version_mp_8812a_phy_reg();
+		break;
 #endif
 #endif /* @(DM_ODM_SUPPORT_TYPE != ODM_AP) */
+#if (RTL8723D_SUPPORT)
+	case ODM_RTL8723D:
+		version = odm_get_version_mp_8723d_phy_reg();
+		break;
+#endif
+#if (RTL8710B_SUPPORT)
+	case ODM_RTL8710B:
+		version = odm_get_version_mp_8710b_phy_reg();
+		break;
+#endif
+#if (RTL8188E_SUPPORT)
+	case ODM_RTL8188E:
+		version = odm_get_version_mp_8188e_phy_reg();
+		break;
+#endif
+#if (RTL8723B_SUPPORT)
+	case ODM_RTL8723B:
+		version = odm_get_version_mp_8723b_phy_reg();
+		break;
+#endif
+#if (RTL8814A_SUPPORT)
+	case ODM_RTL8814A:
+		version = odm_get_version_mp_8814a_phy_reg();
+		break;
+#endif
+#if (RTL8703B_SUPPORT)
+	case ODM_RTL8703B:
+		version = odm_get_version_mp_8703b_phy_reg();
+		break;
+#endif
+#if (RTL8188F_SUPPORT)
+	case ODM_RTL8188F:
+		version = odm_get_version_mp_8188f_phy_reg();
+		break;
+#endif
+#if (RTL8822B_SUPPORT)
+	case ODM_RTL8822B:
+		version = odm_get_version_mp_8822b_phy_reg();
+		break;
+#endif
+#if (RTL8197F_SUPPORT)
+	case ODM_RTL8197F:
+		version = odm_get_version_mp_8197f_phy_reg();
+		break;
+#endif
 
-/*@1 All platforms support*/
-#if (RTL8188E_SUPPORT == 1)
-	if (dm->support_ic_type == ODM_RTL8188E)
-		version = GET_VERSION_MP(8188e, _mac_reg);
+#if (RTL8192F_SUPPORT)
+	case ODM_RTL8192F:
+		version = odm_get_version_mp_8192f_phy_reg();
+		break;
 #endif
-#if (RTL8723B_SUPPORT == 1)
-	if (dm->support_ic_type == ODM_RTL8723B)
-		version = GET_VERSION_MP(8723b, _mac_reg);
+#if (RTL8721D_SUPPORT)
+	case ODM_RTL8721D:
+		version = odm_get_version_mp_8721d_phy_reg();
+		break;
 #endif
-#if (RTL8814A_SUPPORT == 1)
-	if (dm->support_ic_type == ODM_RTL8814A)
-		version = GET_VERSION_MP(8814a, _mac_reg);
+#if (RTL8710C_SUPPORT)
+	case ODM_RTL8710C:
+		version = GET_VERSION_MP(8710c, _mac_reg);
 #endif
-#if (RTL8703B_SUPPORT == 1)
-	if (dm->support_ic_type == ODM_RTL8703B)
-		version = GET_VERSION_MP(8703b, _mac_reg);
+#if (RTL8821C_SUPPORT)
+	case ODM_RTL8821C:
+		version = odm_get_version_mp_8821c_phy_reg();
+		break;
 #endif
-#if (RTL8188F_SUPPORT == 1)
-	if (dm->support_ic_type == ODM_RTL8188F)
-		version = GET_VERSION_MP(8188f, _mac_reg);
+#if (RTL8195B_SUPPORT)
+	case ODM_RTL8195B:
+		version = odm_get_version_mp_8195b_phy_reg();
+		break;
 #endif
-#if (RTL8822B_SUPPORT == 1)
-	if (dm->support_ic_type == ODM_RTL8822B)
-		version = GET_VERSION_MP(8822b, _mac_reg);
+#if (RTL8198F_SUPPORT)
+	case ODM_RTL8198F:
+		version = odm_get_version_mp_8198f_phy_reg();
+		break;
 #endif
-#if (RTL8197F_SUPPORT == 1)
-	if (dm->support_ic_type == ODM_RTL8197F)
-		version = GET_VERSION_MP(8197f, _mac_reg);
+#if (RTL8822C_SUPPORT)
+	case ODM_RTL8822C:
+		version = odm_get_version_mp_8822c_phy_reg();
+		break;
 #endif
-
-/*@jj add 20170822*/
-#if (RTL8192F_SUPPORT == 1)
-	if (dm->support_ic_type == ODM_RTL8192F)
-		version = GET_VERSION_MP(8192f, _mac_reg);
-#endif
-#if (RTL8721D_SUPPORT == 1)
-	if (dm->support_ic_type == ODM_RTL8721D)
-		version = GET_VERSION_MP(8721d, _mac_reg);
-#endif
-#if (RTL8821C_SUPPORT == 1)
-	if (dm->support_ic_type == ODM_RTL8821C)
-		version = GET_VERSION(8821c, _mac_reg);
-#endif
-#if (RTL8195B_SUPPORT == 1)
-	if (dm->support_ic_type == ODM_RTL8195B)
-		version = GET_VERSION(8195b, _mac_reg);
-#endif
-#if (RTL8198F_SUPPORT == 1)
-	if (dm->support_ic_type == ODM_RTL8198F)
-		version = GET_VERSION_MP(8198f, _mac_reg);
-#endif
-#if 0 /*(RTL8822C_SUPPORT)*/
-	if (dm->support_ic_type == ODM_RTL8822C)
-		version = GET_VERSION_MP(8822c, _mac_reg);
+#if (RTL8822E_SUPPORT)
+		case ODM_RTL8822E:
+			version = odm_get_version_mp_8822e_phy_reg();
+			break;
 #endif
 #if (RTL8812F_SUPPORT)
-	if (dm->support_ic_type == ODM_RTL8812F)
-		version = GET_VERSION_MP(8812f, _mac_reg);
+	case ODM_RTL8812F:
+		version = odm_get_version_mp_8812f_phy_reg();
+		break;
 #endif
-#if (RTL8814B_SUPPORT == 1)
-	if (dm->support_ic_type == ODM_RTL8814B)
-		version = GET_VERSION_MP(8814b, _mac_reg);
+#if (RTL8197G_SUPPORT)
+	case ODM_RTL8197G:
+		version = odm_get_version_mp_8197g_phy_reg();
+		break;
 #endif
+#if (RTL8723F_SUPPORT)
+	case ODM_RTL8723F:
+		version = odm_get_version_mp_8723f_phy_reg();
+		break;
+#endif
+#if (RTL8735B_SUPPORT)
+	case ODM_RTL8735B:
+		version = odm_get_version_mp_8735b_phy_reg();
+		break;
+#endif
+#if (RTL8730A_SUPPORT)
+	case ODM_RTL8730A:
+		version = odm_get_version_mp_8730a_phy_reg();
+		break;
+#endif
+#if (RTL8814B_SUPPORT)
+	case ODM_RTL8814B:
+		version = odm_get_version_mp_8814b_phy_reg();
+		break;
+#endif
+#if (RTL8814C_SUPPORT)
+	case ODM_RTL8814C:
+		version = odm_get_version_mp_8814c_phy_reg();
+		break;
+#endif
+	}
 
 	return version;
 }

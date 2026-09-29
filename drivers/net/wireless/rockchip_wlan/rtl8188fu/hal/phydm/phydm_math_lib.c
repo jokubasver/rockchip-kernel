@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2017  Realtek Corporation.
@@ -108,7 +107,7 @@ u16 phydm_find_intrvl(void *dm_void, u16 val, u16 *threshold, u16 th_len)
 void phydm_seq_sorting(void *dm_void, u32 *value, u32 *rank_idx, u32 *idx_out,
 		       u8 seq_length)
 {
-	u8 i = 0, j = 0;
+	u8 i = 0, j = 0, max_j = 0;
 	u32 tmp_a, tmp_b;
 	u32 tmp_idx_a, tmp_idx_b;
 
@@ -116,7 +115,8 @@ void phydm_seq_sorting(void *dm_void, u32 *value, u32 *rank_idx, u32 *idx_out,
 		rank_idx[i] = i;
 
 	for (i = 0; i < (seq_length - 1); i++) {
-		for (j = 0; j < (seq_length - 1 - i); j++) {
+		max_j = seq_length - 1 - i;
+		for (j = 0; j < max_j; j++) {
 			tmp_a = value[j];
 			tmp_b = value[j + 1];
 
@@ -143,10 +143,8 @@ u32 odm_convert_to_db(u64 value)
 	u8 j;
 	u32 dB;
 
-	if (value >= db_invert_table[11][7]) {
-		pr_debug("[%s] ====>\n", __func__);
+	if (value >= db_invert_table[11][7])
 		return 96; /* @maximum 96 dB */
-	}
 
 	for (i = 0; i < 12; i++) {
 		if (i <= 2 && (value << FRAC_BITS) <= db_invert_table[i][7])
@@ -162,27 +160,32 @@ u32 odm_convert_to_db(u64 value)
 			break;
 	}
 
+	/*special cases*/
 	if (j == 0 && i == 0)
 		goto end;
 
+	if (i == 3 && j == 0) {
+		if (db_invert_table[3][0] - value >
+		    value - (db_invert_table[2][7] >> FRAC_BITS)) {
+			i = 2;
+			j = 7;
+		}
+		goto end;
+	}
+
+	if (i < 3)
+		value = value << FRAC_BITS; /*@elements of row 0~2 shift left*/
+
+	/*compare difference to get precise dB*/
 	if (j == 0) {
-		if (i != 3) {
-			if (db_invert_table[i][0] - value >
-			    value - db_invert_table[i - 1][7]) {
-				i = i - 1;
-				j = 7;
-			}
-		} else {
-			if (db_invert_table[3][0] - value >
-			    value - db_invert_table[2][7]) {
-				i = 2;
-				j = 7;
-			}
+		if (db_invert_table[i][j] - value >
+		    value - db_invert_table[i - 1][7]) {
+			i = i - 1;
+			j = 7;
 		}
 	} else {
 		if (db_invert_table[i][j] - value >
 		    value - db_invert_table[i][j - 1]) {
-			i = i;
 			j = j - 1;
 		}
 	}
@@ -194,14 +197,19 @@ end:
 
 u64 phydm_db_2_linear(u32 value)
 {
-	u8 i;
-	u8 j;
-	u64 linear;
+	u8 i = 0;
+	u8 j = 0;
+	u64 linear = 0;
+
+	value = value & 0xFF;
 
 	/* @1dB~96dB */
-	if (value > 96)
+	if (value > 96) {
 		value = 96;
-	value = value & 0xFF;
+	} else if (value < 1) {
+		linear = 1;
+		return linear;
+	}
 
 	i = (u8)((value - 1) >> 3);
 	j = (u8)(value - 1) - (i << 3);
@@ -227,6 +235,21 @@ u16 phydm_show_fraction_num(u32 frac_val, u8 bit_num)
 	return val;
 }
 
+u16 phydm_ones_num_in_bitmap(u64 val, u8 size)
+{
+	u8 i = 0;
+	u8 ones_num = 0;
+
+	for (i = 0; i < size; i++) {
+		if (val & BIT(0))
+			ones_num++;
+
+		val = val >> 1;
+	}
+
+	return ones_num;
+}
+
 u64 phydm_gen_bitmask(u8 mask_num)
 {
 	u8 i = 0;
@@ -243,9 +266,26 @@ u64 phydm_gen_bitmask(u8 mask_num)
 
 s32 phydm_cnvrt_2_sign(u32 val, u8 bit_num)
 {
+	if (bit_num >= 32)
+		return (s32)val;
+
 	if (val & BIT(bit_num - 1)) /*Sign BIT*/
 		val -= (1 << bit_num); /*@2's*/
 
 	return val;
+}
+
+s64 phydm_cnvrt_2_sign_64(u64 val, u8 bit_num)
+{
+	u64 one = 1;
+	s64 val_sign = (s64)val;
+
+	if (bit_num >= 64)
+		return (s64)val;
+
+	if (val & (one << (bit_num - 1))) /*Sign BIT*/
+		val_sign = val - (one << bit_num); /*@2's*/
+
+	return val_sign;
 }
 

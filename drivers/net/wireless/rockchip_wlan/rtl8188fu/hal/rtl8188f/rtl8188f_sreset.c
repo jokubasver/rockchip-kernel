@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2017 Realtek Corporation.
@@ -51,14 +50,14 @@ void rtl8188f_sreset_xmit_status_check(_adapter *padapter)
 			else {
 				diff_time = rtw_get_passing_time_ms(psrtpriv->last_tx_complete_time);
 				if (diff_time > 4000) {
-					u32 ability = 0;
 
-					/*padapter->Wifi_Error_Status = WIFI_TX_HANG; */
-					ability = rtw_phydm_ability_get(padapter);
-					RTW_INFO("%s tx hang %s\n", __func__,
-						(ability & ODM_BB_ADAPTIVITY) ? "ODM_BB_ADAPTIVITY" : "");
 
-					if (!(ability & ODM_BB_ADAPTIVITY))
+					/* padapter->Wifi_Error_Status = WIFI_TX_HANG; */
+					RTW_INFO("%s tx hang %s\n", __FUNCTION__,
+						!adapter_to_rfctl(padapter)->adaptivity_en ? "" :
+							rtw_edcca_mode_str(rtw_get_edcca_mode(adapter_to_dvobj(padapter), pHalData->current_band_type)));
+
+					if (!adapter_to_rfctl(padapter)->adaptivity_en)
 						rtw_hal_sreset_reset(padapter);
 				}
 			}

@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2011 Realtek Corporation. All rights reserved.
@@ -286,7 +285,9 @@ void rtw_rson_do_disconnect(_adapter *padapter)
 	pdvobj->rson_data.hopcnt = RTW_RSON_HC_NOTREADY;
 	pdvobj->rson_data.connectible = RTW_RSON_DENYCONNECT;
 	pdvobj->rson_data.loading = 0;
+	#ifdef CONFIG_AP_MODE
 	rtw_mi_tx_beacon_hdl(padapter);
+	#endif
 #endif
 }
 
@@ -312,7 +313,9 @@ void rtw_rson_join_done(_adapter *padapter)
 	pdvobj->rson_data.hopcnt = rson_data.hopcnt + 1;
 	pdvobj->rson_data.connectible = RTW_RSON_ALLOWCONNECT;
 	pdvobj->rson_data.loading = 0;
+	#ifdef CONFIG_AP_MODE
 	rtw_mi_tx_beacon_hdl(padapter);
+	#endif
 #endif
 }
 
@@ -381,14 +384,23 @@ int rtw_rson_isupdate_roamcan(struct mlme_priv *mlme
 	return _FALSE;
 }
 
-void rtw_rson_show_survey_info(struct seq_file *m, _list *plist, _list *phead)
+void rtw_rson_show_survey_info(void *sel, _adapter *padapter)
 {
+	struct mlme_priv *pmlmepriv = &(padapter->mlmepriv);
+	_queue *queue = &(pmlmepriv->scanned_queue);
+	_irqL irqL;
+	_list *plist, *phead;
 	struct wlan_network	*pnetwork = NULL;
 	struct rtw_rson_struct  rson_data;
 	s16 rson_score;
 	u16  index = 0;
 
-	RTW_PRINT_SEL(m, "%5s  %-17s  %3s  %5s %14s  %10s  %-3s  %5s %32s\n", "index", "bssid", "ch", "id", "hop_cnt", "loading", "RSSI", "score", "ssid");
+	RTW_PRINT_SEL(sel, "%5s  %-17s  %3s  %5s %14s  %10s  %-3s  %5s %32s\n", "index", "bssid", "ch", "id", "hop_cnt", "loading", "RSSI", "score", "ssid");
+
+	_enter_critical_bh(&(pmlmepriv->scanned_queue.lock), &irqL);
+
+	phead = get_list_head(queue);
+	plist = get_next(phead);
 	while (1) {
 		if (rtw_end_of_queue_search(phead, plist) == _TRUE)
 			break;
@@ -401,7 +413,7 @@ void rtw_rson_show_survey_info(struct seq_file *m, _list *plist, _list *phead)
 		rson_score = 0;
 		if (rtw_get_rson_struct(&(pnetwork->network), &rson_data) == _TRUE)
 			rson_score = rtw_cal_rson_score(&rson_data, pnetwork->network.Rssi);
-		RTW_PRINT_SEL(m, "%5d  "MAC_FMT" %3d  0x%08x %6d %10d   %6d %6d   %32s\n",
+		RTW_PRINT_SEL(sel, "%5d  "MAC_FMT" %3d  0x%08x %6d %10d   %6d %6d   %32s\n",
 			      ++index,
 			      MAC_ARG(pnetwork->network.MacAddress),
 			      pnetwork->network.Configuration.DSConfig,
@@ -412,8 +424,9 @@ void rtw_rson_show_survey_info(struct seq_file *m, _list *plist, _list *phead)
 			      rson_score,
 			      pnetwork->network.Ssid.Ssid);
 		plist = get_next(plist);
-		}
+	}
 
+	_exit_critical_bh(&(pmlmepriv->scanned_queue.lock), &irqL);
 }
 
 /*
@@ -498,7 +511,7 @@ u8 rtw_rson_scan_wk_cmd(_adapter *padapter, int op)
 	pdrvextra_cmd_parm->size = 0;
 	pdrvextra_cmd_parm->pbuf = NULL;
 
-	init_h2fwcmd_w_parm_no_rsp(ph2c, pdrvextra_cmd_parm, GEN_CMD_CODE(_Set_Drv_Extra));
+	init_h2fwcmd_w_parm_no_rsp(ph2c, pdrvextra_cmd_parm, CMD_SET_DRV_EXTRA);
 
 	res = rtw_enqueue_cmd(pcmdpriv, ph2c);
 
@@ -536,13 +549,13 @@ void rtw_rson_scan_cmd_hdl(_adapter *padapter, int op)
 			if (check_fwstate(pmlmepriv, WIFI_ADHOC_STATE) != _TRUE) {
 				int s_ret;
 
-				set_fwstate(pmlmepriv, _FW_UNDER_LINKING);
+				set_fwstate(pmlmepriv, WIFI_UNDER_LINKING);
 				pmlmepriv->to_join = _FALSE;
 				s_ret = rtw_select_and_join_from_scanned_queue(pmlmepriv);
 				if (s_ret == _SUCCESS)
 					_set_timer(&pmlmepriv->assoc_timer, MAX_JOIN_TIMEOUT);
 				else if (s_ret == 2) {
-					_clr_fwstate_(pmlmepriv, _FW_UNDER_LINKING);
+					_clr_fwstate_(pmlmepriv, WIFI_UNDER_LINKING);
 					rtw_indicate_connect(padapter);
 				} else {
 					RTW_INFO("try_to_join, but select scanning queue fail, to_roam:%d\n", rtw_to_roam(padapter));
@@ -555,13 +568,13 @@ void rtw_rson_scan_cmd_hdl(_adapter *padapter, int op)
 							pmlmepriv->to_join = _TRUE;
 					} else
 						rtw_indicate_disconnect(padapter, 0, _FALSE);
-					_clr_fwstate_(pmlmepriv, _FW_UNDER_LINKING);
+					_clr_fwstate_(pmlmepriv, WIFI_UNDER_LINKING);
 				}
 			}
 		} else {
 			if (rtw_chk_roam_flags(padapter, RTW_ROAM_ACTIVE)) {
 				if (check_fwstate(pmlmepriv, WIFI_STATION_STATE)
-				    && check_fwstate(pmlmepriv, _FW_LINKED)) {
+				    && check_fwstate(pmlmepriv, WIFI_ASOC_STATE)) {
 					if (rtw_select_roaming_candidate(pmlmepriv) == _SUCCESS) {
 #ifdef CONFIG_RTW_80211R
 						if (rtw_chk_ft_flags(padapter, RTW_FT_OVER_DS_SUPPORTED)) {

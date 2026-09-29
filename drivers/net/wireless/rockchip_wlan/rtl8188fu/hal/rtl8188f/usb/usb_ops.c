@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2017 Realtek Corporation.
@@ -216,7 +215,7 @@ _exit_recvbuf2recvframe:
 }
 
 
-void rtl8188fu_xmit_tasklet(void *priv)
+void rtl8188fu_xmit_tasklet(unsigned long priv)
 {
 	int ret = _FALSE;
 	_adapter *padapter = (_adapter *)priv;

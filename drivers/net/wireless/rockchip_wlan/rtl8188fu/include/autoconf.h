@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2017 Realtek Corporation.
@@ -53,7 +52,6 @@
 	#define CONFIG_SET_SCAN_DENY_TIMER
 #endif
 
-#define CONFIG_AP_MODE
 #ifdef CONFIG_AP_MODE
 	#define CONFIG_NATIVEAP_MLME
 	#ifndef CONFIG_NATIVEAP_MLME
@@ -63,7 +61,6 @@
 	/* #define CONFIG_AUTO_AP_MODE */
 #endif
 
-#define CONFIG_P2P
 #ifdef CONFIG_P2P
 	/*
 	 * Added by Albert 20110812
@@ -103,8 +100,6 @@
 	/* #define DBG_RUNTIME_PORT_SWITCH */
 #endif /* CONFIG_CONCURRENT_MODE */
 
-#define CONFIG_LAYER2_ROAMING
-#define CONFIG_LAYER2_ROAMING_RESUME
 
 /*
  * Hareware/Firmware Related Configure
@@ -130,6 +125,8 @@
 #define DISABLE_BB_RF	0
 
 #define RTW_NOTCH_FILTER 0 /* 0:Disable, 1:Enable, */
+
+#define CONFIG_RX_PACKET_APPEND_FCS
 
 /*
  * Interface Related Configure
@@ -217,12 +214,11 @@
 
 #ifdef CONFIG_POWER_SAVING
 #define CONFIG_IPS
-#define CONFIG_LPS
-
 #ifdef CONFIG_IPS
-/* #define CONFIG_IPS_LEVEL_2	1  */ /*enable this to set default IPS mode to IPS_LEVEL_2 */
-#endif
+	/* #define CONFIG_FWLPS_IN_IPS */
+#endif /* CONFIG_IPS */
 
+#define CONFIG_LPS
 #if defined(CONFIG_LPS)
 	#define CONFIG_LPS_LCLK
 #endif
@@ -270,6 +266,7 @@
 	#define CONFIG_PREALLOC_RECV_SKB
 	#ifdef CONFIG_PREALLOC_RECV_SKB
 		/* #define CONFIG_FIX_NR_BULKIN_BUFFER */ /* only use PREALLOC_RECV_SKB buffer, don't alloc skb at runtime */
+		#define CONFIG_USB_PROTECT_RX_CLONED_SKB
 	#endif
 #endif
 
@@ -294,10 +291,6 @@
 	#define DBG	0	/* for ODM & BTCOEX debug */
 	#define DBG_PHYDM_MORE 0
 #endif /* CONFIG_RTW_DEBUG */
-
-
-
-#define CONFIG_PROC_DEBUG
 
 /*
 #define DBG_CONFIG_ERROR_DETECT

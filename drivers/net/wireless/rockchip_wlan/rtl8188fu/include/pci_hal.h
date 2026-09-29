@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2017 Realtek Corporation.
@@ -51,6 +50,15 @@
 #ifdef CONFIG_RTL8822C
 	void rtl8822ce_set_hal_ops(PADAPTER padapter);
 #endif
+
+#ifdef CONFIG_RTL8814B
+	void rtl8814be_set_hal_ops(PADAPTER padapter);
+#endif
+
+#ifdef CONFIG_RTL8822E
+	void rtl8822ee_set_hal_ops(PADAPTER padapter);
+#endif
+
 
 u8 rtw_set_hal_ops(_adapter *padapter);
 

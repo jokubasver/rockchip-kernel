@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2017 Realtek Corporation.
@@ -175,6 +174,8 @@
 #define REG_TXDMA_OFFSET_CHK			0x020C
 #define REG_TXDMA_STATUS				0x0210
 #define REG_RQPN_NPQ					0x0214
+#define REG_TQPNT1						0x0218
+#define REG_TQPNT2						0x021C
 #define REG_AUTO_LLT					0x0224
 
 
@@ -510,9 +511,12 @@
 #define REG_WLAN_ACT_MASK_CTRL_1		0x076C
 
 /* GPIO Control */
-#define REG_SW_GPIO_SHARE_CTRL			0x1038
+#define REG_SW_GPIO_SHARE_CTRL_0		0x1038
+#define REG_SW_GPIO_SHARE_CTRL_1		0x103C
 #define REG_SW_GPIO_A_OUT				0x1040
 #define REG_SW_GPIO_A_OEN				0x1044
+#define REG_SW_GPIO_B_OEN				0x1058
+#define REG_SW_GPIO_B_OUT				0x105C
 
 /* Hardware Port 2 */
 #define REG_MACID2						0x1620
@@ -682,6 +686,7 @@ Default: 00b.
 #define USB_INTR_CONTENT_HISRE_OFFSET		52
 #define USB_INTR_CONTENT_LENGTH				56
 
+
 /* WOL bit information */
 #define HAL92C_WOL_PTK_UPDATE_EVENT		BIT(0)
 #define HAL92C_WOL_GTK_UPDATE_EVENT		BIT(1)
@@ -724,7 +729,6 @@ Default: 00b.
 
 #define RRSR_CCK_RATES (RRSR_11M | RRSR_5_5M | RRSR_2M | RRSR_1M)
 #define RRSR_OFDM_RATES (RRSR_54M | RRSR_48M | RRSR_36M | RRSR_24M | RRSR_18M | RRSR_12M | RRSR_9M | RRSR_6M)
-
 
 /* ----------------------------------------------------------------------------
  * Rate Definition
@@ -820,9 +824,19 @@ Default: 00b.
 /* ----------------------------------------------------------------------------
  * CAM Config Setting (offset 0x680, 1 byte)
  * ----------------------------------------------------------------------------			 */
+#define CAM_MIC_KEY				BIT(5)
+#define CAM_GROUP_KEY				BIT(6)
+#define CAM_EXT_SEC_KEY				BIT(9)
+#define CAM_MGNT_KEY				BIT(10)
 #define CAM_VALID				BIT(15)
 #define CAM_NOTVALID			0x0000
 #define CAM_USEDK				BIT(5)
+
+#define CAM_KEY_ID_BIT_MASK			0x03
+#define CAM_SEC_TYPE_BIT_MASK			0x07
+
+#define CAM_KEY_ID_BIT_LEN			2
+#define CAM_CTRL_SIZE				2
 
 #define CAM_CONTENT_COUNT	8
 
@@ -1096,6 +1110,7 @@ Current IOREG MAP
 *	the correct arragement is VO - Bit0, VI - Bit1, BE - Bit2, and BK - Bit3.
 *	8723 and 88E may be not correct either in the eralier version. Confirmed with DD Tim.
 * By Bruce, 2011-09-22. */
+#define StopBcnHiMgt	BIT(7)
 #define StopBecon		BIT(6)
 #define StopHigh			BIT(5)
 #define StopMgt			BIT(4)
@@ -1103,6 +1118,7 @@ Current IOREG MAP
 #define StopBE			BIT(2)
 #define StopVI			BIT(1)
 #define StopVO			BIT(0)
+#define StopAll			(StopBecon | StopHigh | StopMgt | StopBK | StopBE | StopVI | StopVO)
 
 /* ----------------------------------------------------------------------------
  * 8192C (RCR) Receive Configuration Register	(Offset 0x608, 32 bits)
@@ -1252,9 +1268,13 @@ Current IOREG MAP
 /* 2 REG_LED_CFG				(Offset 0x004C) */
 #define BIT_SW_SPDT_SEL			BIT(22)
 
-/* 2 REG_SW_GPIO_SHARE_CTRL		(Offset 0x1038) */
+/* 2 REG_SW_GPIO_SHARE_CTRL_0	(Offset 0x1038) */
 #define BIT_BTGP_WAKE_LOC		(BIT(10) | BIT(11))
 #define BIT_SW_GPIO_FUNC 		BIT(0)
+
+/* 2 REG_SW_GPIO_SHARE_CTRL_1	(Offset 0x103C) */
+#define 	BIT_WLMAC_DBG_LOC	(BIT(9) | BIT(10))
+#define 	BIT_WL_GPIO_SEL		(BIT(30) | BIT(31))
 
 /* 2 8051FWDL
  * 2 MCUFWDL */
@@ -1864,6 +1884,7 @@ Current IOREG MAP
 #define LAST_ENTRY_OF_TX_PKT_BUFFER_8723D		255
 #define LAST_ENTRY_OF_TX_PKT_BUFFER_8710B		255
 #define LAST_ENTRY_OF_TX_PKT_BUFFER_8192F		255
+#define LAST_ENTRY_OF_TX_PKT_BUFFER_8723F		255
 #define POLLING_LLT_THRESHOLD				20
 #if defined(CONFIG_RTL8723B) && defined(CONFIG_PCI_HCI)
 	#define POLLING_READY_TIMEOUT_COUNT		6000
