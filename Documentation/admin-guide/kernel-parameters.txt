@@ -4962,6 +4962,14 @@
 			[KNL] Disable ring 3 MONITOR/MWAIT feature on supported
 			CPUs.
 
+	rk817_gauge=	[ROCKCHIP] RK817 battery fuel gauge, with
+			CONFIG_BATTERY_RK817_ARKOS4CLONE.
+			Format: { rockchip | arkos4clone }
+			rockchip: standard Rockchip gauge (default).
+			arkos4clone: ArkOS4Clone coulomb-counting gauge. Its
+			parameters are rk817_battery_arkos4clone.lowpwr_poweroff
+			(default 1), .drift_correct and .drift_log (default 0).
+
 	ro		[KNL] Mount root device read-only on boot
 
 	rodata=		[KNL]

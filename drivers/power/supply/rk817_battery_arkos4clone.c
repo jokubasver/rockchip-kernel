@@ -34,6 +34,8 @@
 #include <linux/workqueue.h>
 #include <linux/gpio/consumer.h>
 
+#include "rk817_battery.h"
+
 /* Hybrid mode (voltage + coulomb counting) constants */
 #define HYBRID_V_FULL_CHG_DEFAULT	4100
 #define HYBRID_V_FULL_DIS_DEFAULT	4000
@@ -87,6 +89,25 @@ MODULE_PARM_DESC(drift_correct, "Pull the coulomb counter down toward the ocv_ta
 static bool drift_log;
 module_param(drift_log, bool, 0644);
 MODULE_PARM_DESC(drift_log, "Log the rest samples drift_correct would use, without correcting");
+
+/* rk817_gauge=arkos4clone selects this gauge, see rk817_battery.h */
+static bool rk817_gauge_arkos4clone;
+
+static int __init rk817_gauge_setup(char *str)
+{
+	if (!strcmp(str, "arkos4clone"))
+		rk817_gauge_arkos4clone = true;
+	else if (strcmp(str, "rockchip"))
+		pr_warn("unknown rk817_gauge=%s, using the rockchip gauge\n",
+			str);
+	return 1;
+}
+__setup("rk817_gauge=", rk817_gauge_setup);
+
+bool rk817_battery_arkos4clone_selected(void)
+{
+	return rk817_gauge_arkos4clone;
+}
 
 #define DBG(args...) \
 	do { \
@@ -3649,6 +3670,10 @@ static struct platform_driver rk817_battery_driver = {
 
 static int __init rk817_battery_init(void)
 {
+	/* Otherwise rk817_battery.c drives the device */
+	if (!rk817_gauge_arkos4clone)
+		return 0;
+
 	return platform_driver_register(&rk817_battery_driver);
 }
 fs_initcall_sync(rk817_battery_init);
