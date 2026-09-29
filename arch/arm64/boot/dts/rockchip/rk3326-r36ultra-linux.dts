@@ -916,14 +916,6 @@
 	};
 };
 
-&usb_host0_ehci {
-	status = "okay";
-};
-
-&usb_host0_ohci {
-	status = "okay";
-};
-
 &usb20_otg {
 	vbus-supply = <&vbus_host>;
 	status = "okay";
