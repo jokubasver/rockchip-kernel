@@ -148,7 +148,7 @@
 #include <linux/workqueue.h>
 #include <linux/power_supply.h>
 #include <linux/delay.h>
-#include <linux/timer.h>
+#include <linux/mutex.h>
 #include <linux/interrupt.h>
 
 /* 最大独立 LED 数量 */
@@ -268,6 +268,10 @@ static const char *led_names[MAX_LEDS] = {
 
 /**
  * struct arkos4clone_led_priv - 驱动私有数据
+ * @pulse_work: sends the pulse train and refreshes it
+ * @pulse_lock: serialises pulse trains and the pulse_* state
+ * @pulse_pending: pulse_mode set but not sent yet
+ * @pulse_stopped: suspended or removed, no pulse trains
  */
 struct arkos4clone_led_priv {
 	struct device *dev;
@@ -288,11 +292,13 @@ struct arkos4clone_led_priv {
 	int irq_gpio;
 	int irq_num;
 	struct led_classdev pulse_cdev;
+	struct delayed_work pulse_work;
+	struct mutex pulse_lock;
 	int pulse_mode;
-	struct timer_list refresh_timer;
+	bool pulse_pending;
+	bool pulse_stopped;
 
 	/* 充电监控 */
-	struct power_supply *psy;
 	struct delayed_work charge_work;
 	bool charging;
 	bool full;
@@ -335,6 +341,8 @@ static irqreturn_t arkos4clone_led_irq_handler(int irq, void *dev_id)
  *   第三步：发送 pulse_count 个数据脉冲，每个脉冲高→1ms→低→1ms
  *   第四步：结束延时 5ms，确保低电平
  *
+ * 可能睡眠，调用者需持有 pulse_lock（probe 注册前除外）。
+ *
  * 脉冲数与模式对应关系：
  *   1=红, 2=黄, 3=绿, 4=青, 5=蓝, 6=紫, 7=白, 8=呼吸, 9=彩虹, 10/11=关闭
  */
@@ -359,9 +367,26 @@ static void send_pulse_count(int pulse_gpio, int pulse_count)
 		udelay(PULSE_DELAY_US);
 	}
 
-	/* 第四步: 结束延时并确保低电平 */
-	udelay(PULSE_GAP_US);
+	/* 第四步: 结束延时并确保低电平 (idle low, may be longer) */
+	usleep_range(PULSE_GAP_US, PULSE_GAP_US + 1000);
 	gpio_set_value(pulse_gpio, 0);
+}
+
+static bool pulse_mode_is_off(int mode)
+{
+	/* 10 and 11 pulses both turn the LED off */
+	return mode <= 0 || mode >= PULSE_MODE_OFF;
+}
+
+/* Queue a pulse train for @mode; caller holds pulse_lock */
+static void arkos4clone_pulse_queue(struct arkos4clone_led_priv *priv, int mode)
+{
+	lockdep_assert_held(&priv->pulse_lock);
+
+	priv->pulse_mode = mode;
+	priv->pulse_pending = true;
+	if (!priv->pulse_stopped)
+		mod_delayed_work(system_unbound_wq, &priv->pulse_work, 0);
 }
 
 /**
@@ -381,15 +406,15 @@ static void send_pulse_count(int pulse_gpio, int pulse_count)
  *   197-224 → 呼吸灯（脉冲数 8）
  *   225-255 → 彩虹（脉冲数 9）
  */
-static void arkos4clone_pulse_led_set(struct led_classdev *led_cdev,
-				      enum led_brightness brightness)
+static int arkos4clone_pulse_led_set(struct led_classdev *led_cdev,
+				     enum led_brightness brightness)
 {
 	struct arkos4clone_led_priv *priv =
 		container_of(led_cdev, struct arkos4clone_led_priv, pulse_cdev);
 	int target_mode;
 
 	if (!gpio_is_valid(priv->pulse_gpio))
-		return;
+		return 0;
 
 	if (brightness == LED_OFF) {
 		target_mode = PULSE_MODE_OFF;
@@ -413,37 +438,56 @@ static void arkos4clone_pulse_led_set(struct led_classdev *led_cdev,
 		target_mode = PULSE_MODE_SCROLLING;
 	}
 
-	send_pulse_count(priv->pulse_gpio, target_mode);
-	priv->pulse_mode = target_mode;
+	mutex_lock(&priv->pulse_lock);
+	arkos4clone_pulse_queue(priv, target_mode);
+	mutex_unlock(&priv->pulse_lock);
+
+	return 0;
 }
 
 /**
- * arkos4clone_pulse_led_get - 获取脉冲 LED 当前模式
- * @led_cdev: LED 类设备指针
- *
- * 返回：LED_FULL（模式>0）或 LED_OFF（模式=0/10/11）
- */
-static enum led_brightness arkos4clone_pulse_led_get(struct led_classdev *led_cdev)
-{
-	struct arkos4clone_led_priv *priv =
-		container_of(led_cdev, struct arkos4clone_led_priv, pulse_cdev);
-	return priv->pulse_mode ? LED_FULL : LED_OFF;
-}
-
-/**
- * arkos4clone_pulse_refresh_timer - 脉冲 LED 定时刷新回调
+ * arkos4clone_pulse_work - 发送脉冲并定时刷新
+ * @work: 工作队列结构体指针
  *
  * LED 控制器为非锁存型，需要每隔 2 秒重发一次脉冲以维持当前显示。
- * 定时器在 suspend 时停止，resume 时重启。
+ * Runs in process context so the ~30 ms pulse train is not sent from a
+ * timer. Off needs no refresh. Stopped on suspend, restarted on resume.
  */
-static void arkos4clone_pulse_refresh_timer(struct timer_list *timer)
+static void arkos4clone_pulse_work(struct work_struct *work)
 {
-	struct arkos4clone_led_priv *priv = from_timer(priv, timer, refresh_timer);
+	struct arkos4clone_led_priv *priv =
+		container_of(to_delayed_work(work), struct arkos4clone_led_priv,
+			     pulse_work);
+	bool on;
 
-	if (priv->pulse_mode > 0)
+	mutex_lock(&priv->pulse_lock);
+	if (priv->pulse_stopped)
+		goto unlock;
+
+	on = !pulse_mode_is_off(priv->pulse_mode);
+	if (on || priv->pulse_pending)
 		send_pulse_count(priv->pulse_gpio, priv->pulse_mode);
+	priv->pulse_pending = false;
 
-	mod_timer(&priv->refresh_timer, jiffies + REFRESH_INTERVAL);
+	if (on)
+		queue_delayed_work(system_unbound_wq, &priv->pulse_work,
+				   REFRESH_INTERVAL);
+unlock:
+	mutex_unlock(&priv->pulse_lock);
+}
+
+/* Stop the refresh and turn the pulse LED off; pulse_mode is kept */
+static void arkos4clone_pulse_stop(struct arkos4clone_led_priv *priv)
+{
+	mutex_lock(&priv->pulse_lock);
+	priv->pulse_stopped = true;
+	mutex_unlock(&priv->pulse_lock);
+
+	cancel_delayed_work_sync(&priv->pulse_work);
+
+	mutex_lock(&priv->pulse_lock);
+	send_pulse_count(priv->pulse_gpio, PULSE_MODE_OFF);
+	mutex_unlock(&priv->pulse_lock);
 }
 
 /* ===== 独立 GPIO LED 函数实现 ===== */
@@ -808,7 +852,7 @@ static int arkos4clone_bicolor_init(struct arkos4clone_led_priv *priv)
  *
  * 初始化操作：
  *   - 发送脉冲数 11（关闭 LED）作为初始状态
- *   - 启动 2 秒定时刷新（维持非锁存控制器的显示）
+ *   - 设置颜色后启动 2 秒定时刷新（维持非锁存控制器的显示）
  *
  * 返回：0=成功，负数=错误码
  */
@@ -871,10 +915,19 @@ static int arkos4clone_pulse_led_init(struct arkos4clone_led_priv *priv)
 		return ret;
 	}
 
-	/* 注册 joyled LED 类设备 */
+	mutex_init(&priv->pulse_lock);
+	INIT_DELAYED_WORK(&priv->pulse_work, arkos4clone_pulse_work);
+
+	/* 发送初始化脉冲 (11脉冲 = 关闭)，在 sysfs 可见之前 */
+	send_pulse_count(priv->pulse_gpio, 11);
+	priv->pulse_mode = 11;
+
+	/*
+	 * 注册 joyled LED 类设备。No brightness_get: the cached brightness
+	 * is the last value set (0 when off).
+	 */
 	priv->pulse_cdev.name = "joyled";
-	priv->pulse_cdev.brightness_set = arkos4clone_pulse_led_set;
-	priv->pulse_cdev.brightness_get = arkos4clone_pulse_led_get;
+	priv->pulse_cdev.brightness_set_blocking = arkos4clone_pulse_led_set;
 	priv->pulse_cdev.max_brightness = 255;
 	priv->pulse_cdev.flags = 0;
 	priv->pulse_cdev.groups = joyled_groups;
@@ -885,14 +938,7 @@ static int arkos4clone_pulse_led_init(struct arkos4clone_led_priv *priv)
 		return ret;
 	}
 
-	/* 发送初始化脉冲 (11脉冲 = 关闭) */
-	send_pulse_count(priv->pulse_gpio, 11);
-	priv->pulse_mode = 11;
-
-	/* 启动定时刷新 */
-	timer_setup(&priv->refresh_timer, arkos4clone_pulse_refresh_timer, 0);
-	mod_timer(&priv->refresh_timer, jiffies + REFRESH_INTERVAL);
-
+	/* 定时刷新在设置颜色后启动 */
 	priv->has_pulse_led = true;
 
 	dev_info(dev, "Pulse LED: GPIO %d, IRQ GPIO %d (IRQ %d)\n",
@@ -976,6 +1022,29 @@ static void arkos4clone_update_charge_leds(struct arkos4clone_led_priv *priv)
 	/* 非充电 + 无阈值：用户控制，不做任何事 */
 }
 
+static const char * const arkos4clone_psy_names[] = {
+	"battery", "charger", "usb", "dc", "mains",
+};
+
+/*
+ * Look the supply up on every poll and drop it right after: the battery
+ * driver may probe after this one or be unbound, and a reference kept
+ * across an unbind would call into the gone driver.
+ */
+static struct power_supply *arkos4clone_charge_psy_get(void)
+{
+	struct power_supply *psy;
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(arkos4clone_psy_names); i++) {
+		psy = power_supply_get_by_name(arkos4clone_psy_names[i]);
+		if (psy)
+			return psy;
+	}
+
+	return NULL;
+}
+
 /**
  * arkos4clone_charge_work - 充电状态检测工作队列
  * @work: 工作队列结构体指针
@@ -997,26 +1066,35 @@ static void arkos4clone_charge_work(struct work_struct *work)
 	struct arkos4clone_led_priv *priv =
 		container_of(to_delayed_work(work), struct arkos4clone_led_priv, charge_work);
 	union power_supply_propval val_status;
+	struct power_supply *psy;
 	bool charging = false;
 	bool full = false;
 	int ret;
 
-	if (!priv->psy)
+	psy = arkos4clone_charge_psy_get();
+	if (!psy)
 		goto reschedule;
+
+	if (!priv->charge_monitoring) {
+		priv->charge_monitoring = true;
+		dev_info(priv->dev, "Charge monitoring enabled (%s)\n",
+			 psy->desc->name);
+	}
 
 	/* 读取电池容量 */
 	{
 		union power_supply_propval val_cap;
 		int ret_cap;
-		ret_cap = power_supply_get_property(priv->psy, POWER_SUPPLY_PROP_CAPACITY, &val_cap);
+		ret_cap = power_supply_get_property(psy, POWER_SUPPLY_PROP_CAPACITY, &val_cap);
 		if (ret_cap == 0)
 			priv->battery_capacity = val_cap.intval;
 	}
 
 	/* 从电池电源供应获取充电状态 */
-	ret = power_supply_get_property(priv->psy, POWER_SUPPLY_PROP_STATUS, &val_status);
+	ret = power_supply_get_property(psy, POWER_SUPPLY_PROP_STATUS, &val_status);
+	power_supply_put(psy);
 	if (ret) {
-		dev_err(priv->dev, "Failed to get STATUS property: %d\n", ret);
+		dev_err_ratelimited(priv->dev, "Failed to get STATUS property: %d\n", ret);
 		goto reschedule;
 	}
 
@@ -1064,13 +1142,20 @@ reschedule:
 			      msecs_to_jiffies(CHARGE_POLL_INTERVAL));
 }
 
+static bool arkos4clone_has_charge_led(struct arkos4clone_led_priv *priv)
+{
+	return priv->has_bicolor || priv->leds[LED_RED].valid ||
+	       priv->leds[LED_BLUE].valid;
+}
+
 /**
  * arkos4clone_charge_monitor_init - 初始化充电监控
  * @priv: 私有数据结构指针
  *
  * 检查是否有可用于充电指示的 LED（bicolor、led-red、led-blue）。
- * 如果存在，尝试获取电源供应对象（battery → charger → usb → dc → mains），
- * 并启动 2 秒周期的充电状态轮询工作队列。
+ * 如果存在，启动 2 秒周期的充电状态轮询工作队列。电源供应对象
+ * （battery → charger → usb → dc → mains）在每次轮询时查找，
+ * 找到后才开启充电监控。
  *
  * 首次轮询延迟 500ms（给 power_supply 子系统时间注册）。
  *
@@ -1078,59 +1163,19 @@ reschedule:
  */
 static int arkos4clone_charge_monitor_init(struct arkos4clone_led_priv *priv)
 {
-	bool has_charge_led = false;
+	/* Always initialised: suspend/remove/shutdown cancel it */
+	INIT_DELAYED_WORK(&priv->charge_work, arkos4clone_charge_work);
 
-	/* 检查是否有可用于充电指示的 LED */
-	if (priv->has_bicolor)
-		has_charge_led = true;
-
-	/* 如果配置了 led-red 或 led-blue，启用充电监控 */
-	if (priv->leds[LED_RED].valid || priv->leds[LED_BLUE].valid)
-		has_charge_led = true;
-
-	if (!has_charge_led) {
+	if (!arkos4clone_has_charge_led(priv)) {
 		dev_info(priv->dev, "Charge monitoring disabled (no charge LED configured)\n");
-		return 0;
-	}
-
-	/* 尝试获取电源供应对象 */
-	priv->psy = power_supply_get_by_name("battery");
-	if (priv->psy) {
-		dev_dbg(priv->dev, "Found power supply: battery\n");
-	} else {
-		priv->psy = power_supply_get_by_name("charger");
-		if (priv->psy)
-			dev_dbg(priv->dev, "Found power supply: charger\n");
-	}
-	if (!priv->psy) {
-		priv->psy = power_supply_get_by_name("usb");
-		if (priv->psy)
-			dev_dbg(priv->dev, "Found power supply: usb\n");
-	}
-	if (!priv->psy) {
-		priv->psy = power_supply_get_by_name("dc");
-		if (priv->psy)
-			dev_dbg(priv->dev, "Found power supply: dc\n");
-	}
-	if (!priv->psy) {
-		priv->psy = power_supply_get_by_name("mains");
-		if (priv->psy)
-			dev_dbg(priv->dev, "Found power supply: mains\n");
-	}
-
-	if (!priv->psy) {
-		dev_info(priv->dev, "No power supply found, charge monitoring disabled\n");
 		return 0;
 	}
 
 	priv->charging = false;
 	priv->full = false;
-	priv->charge_monitoring = true;
 
-	INIT_DELAYED_WORK(&priv->charge_work, arkos4clone_charge_work);
 	schedule_delayed_work(&priv->charge_work, msecs_to_jiffies(500));
 
-	dev_info(priv->dev, "Charge monitoring enabled\n");
 	return 0;
 }
 
@@ -1138,17 +1183,11 @@ static int arkos4clone_charge_monitor_init(struct arkos4clone_led_priv *priv)
  * arkos4clone_charge_monitor_exit - 退出充电监控
  * @priv: 私有数据结构指针
  *
- * 停止充电状态轮询工作队列，释放电源供应对象引用。
+ * 停止充电状态轮询工作队列（电源供应对象不跨轮询持有）。
  */
 static void arkos4clone_charge_monitor_exit(struct arkos4clone_led_priv *priv)
 {
-	if (priv->charge_monitoring) {
-		cancel_delayed_work_sync(&priv->charge_work);
-	}
-	if (priv->psy) {
-		power_supply_put(priv->psy);
-		priv->psy = NULL;
-	}
+	cancel_delayed_work_sync(&priv->charge_work);
 }
 
 /**
@@ -1618,10 +1657,11 @@ static ssize_t mode_store(struct device *dev,
 
 			dev_dbg(dev, "设置模式: %s (脉冲数: %d)\n",
 				pulse_mode_map[i].name, pulse_mode_map[i].mode);
-			send_pulse_count(priv->pulse_gpio, pulse_mode_map[i].mode);
-			priv->pulse_mode = pulse_mode_map[i].mode;
 
-			/* 同步 cdev->brightness，确保 LED 核心 suspend/resume 一致 */
+			/*
+			 * 同步 cdev->brightness。Go through the LED core so that
+			 * brightness and mode writes are applied in order.
+			 */
 			switch (pulse_mode_map[i].mode) {
 			case PULSE_MODE_OFF:          brightness_val = 0;   break;
 			case PULSE_MODE_RED:          brightness_val = 14;  break;
@@ -1635,7 +1675,7 @@ static ssize_t mode_store(struct device *dev,
 			case PULSE_MODE_SCROLLING:    brightness_val = 240; break;
 			default:                      brightness_val = 0;   break;
 			}
-			led_cdev->brightness = brightness_val;
+			led_set_brightness(led_cdev, brightness_val);
 			return count;
 		}
 	}
@@ -1710,8 +1750,10 @@ static const struct attribute_group arkos4clone_led_attr_group = {
  *
  * 休眠时的 LED 处理策略：
  *
+ * 0. 停止充电轮询，避免覆盖待机指示状态
+ *
  * 1. 脉冲 LED：
- *    - 停止 2 秒定时刷新（del_timer_sync）
+ *    - 停止 2 秒定时刷新
  *    - 发送 OFF 信号关闭 LED
  *
  * 2. 电源灯（bicolor + led-red + led-blue）：
@@ -1728,11 +1770,12 @@ static int arkos4clone_led_suspend(struct device *dev)
 	if (!priv)
 		return 0;
 
+	/* The poll would overwrite the standby state set below */
+	arkos4clone_charge_monitor_exit(priv);
+
 	/* 脉冲 LED：停止定时刷新，发送关闭信号 */
-	if (priv->has_pulse_led && gpio_is_valid(priv->pulse_gpio)) {
-		del_timer_sync(&priv->refresh_timer);
-		send_pulse_count(priv->pulse_gpio, PULSE_MODE_OFF);
-	}
+	if (priv->has_pulse_led && gpio_is_valid(priv->pulse_gpio))
+		arkos4clone_pulse_stop(priv);
 
 	/* 电源灯：充电/充满走充电逻辑，非充电全部亮 */
 	if (priv->has_bicolor || priv->leds[LED_RED].valid || priv->leds[LED_BLUE].valid) {
@@ -1783,6 +1826,8 @@ static int arkos4clone_led_resume(struct device *dev)
 
 	/* 恢复脉冲 LED */
 	if (priv->has_pulse_led && gpio_is_valid(priv->pulse_gpio)) {
+		mutex_lock(&priv->pulse_lock);
+
 		/* 重新初始化 GPIO 状态 */
 		gpio_direction_output(priv->pulse_gpio, 0);
 		gpio_set_value(priv->pulse_gpio, 0);
@@ -1792,12 +1837,12 @@ static int arkos4clone_led_resume(struct device *dev)
 		send_pulse_count(priv->pulse_gpio, 11);
 		msleep(100);
 
-		/* 恢复之前的模式 */
-		if (priv->pulse_mode > 0 && priv->pulse_mode != PULSE_MODE_OFF)
-			send_pulse_count(priv->pulse_gpio, priv->pulse_mode);
+		/* 恢复之前的模式并重启定时刷新 */
+		priv->pulse_stopped = false;
+		if (!pulse_mode_is_off(priv->pulse_mode))
+			arkos4clone_pulse_queue(priv, priv->pulse_mode);
 
-		/* 重启定时刷新 */
-		mod_timer(&priv->refresh_timer, jiffies + REFRESH_INTERVAL);
+		mutex_unlock(&priv->pulse_lock);
 	}
 
 	/* 恢复电源灯 */
@@ -1833,6 +1878,11 @@ static int arkos4clone_led_resume(struct device *dev)
 		}
 	}
 
+	/* 重启充电轮询 */
+	if (arkos4clone_has_charge_led(priv))
+		schedule_delayed_work(&priv->charge_work,
+				      msecs_to_jiffies(CHARGE_POLL_INTERVAL));
+
 	return 0;
 }
 
@@ -1847,7 +1897,7 @@ static SIMPLE_DEV_PM_OPS(arkos4clone_led_pm_ops,
  * 逆序清理所有资源：
  *   1. 停止充电监控（cancel_delayed_work_sync）
  *   2. 移除 sysfs 属性组
- *   3. 关闭脉冲 LED（del_timer_sync + 发送 OFF 信号）
+ *   3. 关闭脉冲 LED（停止定时刷新 + 发送 OFF 信号）
  *   4. 注销双色 LED class 设备
  *   5. 清理独立 GPIO LED（注销 class 设备 + cancel_work_sync）
  *
@@ -1862,11 +1912,8 @@ static int arkos4clone_led_remove(struct platform_device *pdev)
 	sysfs_remove_group(&pdev->dev.kobj, &arkos4clone_led_attr_group);
 
 	/* 关闭脉冲 LED */
-	if (priv->has_pulse_led) {
-		del_timer_sync(&priv->refresh_timer);
-		if (gpio_is_valid(priv->pulse_gpio))
-			send_pulse_count(priv->pulse_gpio, PULSE_MODE_OFF);
-	}
+	if (priv->has_pulse_led && gpio_is_valid(priv->pulse_gpio))
+		arkos4clone_pulse_stop(priv);
 
 	if (priv->has_bicolor)
 		led_classdev_unregister(&priv->bicolor_cdev);
@@ -1882,6 +1929,7 @@ static int arkos4clone_led_remove(struct platform_device *pdev)
  * @pdev: 平台设备指针
  *
  * 系统关机时关闭所有 LED：
+ *   - 停止充电轮询
  *   - 停止脉冲 LED 定时刷新
  *   - 发送 OFF 信号关闭脉冲 LED
  */
@@ -1889,12 +1937,13 @@ static void arkos4clone_led_shutdown(struct platform_device *pdev)
 {
 	struct arkos4clone_led_priv *priv = platform_get_drvdata(pdev);
 
-	if (priv && priv->has_pulse_led) {
-		if (gpio_is_valid(priv->pulse_gpio)) {
-			del_timer_sync(&priv->refresh_timer);
-			send_pulse_count(priv->pulse_gpio, PULSE_MODE_OFF);
-		}
-	}
+	if (!priv)
+		return;
+
+	arkos4clone_charge_monitor_exit(priv);
+
+	if (priv->has_pulse_led && gpio_is_valid(priv->pulse_gpio))
+		arkos4clone_pulse_stop(priv);
 }
 
 /**
@@ -1983,7 +2032,7 @@ static int arkos4clone_led_probe(struct platform_device *pdev)
 	if (ret) {
 		dev_err(dev, "Failed to create sysfs group: %d\n", ret);
 		if (priv->has_pulse_led)
-			del_timer_sync(&priv->refresh_timer);
+			arkos4clone_pulse_stop(priv);
 		if (priv->has_bicolor)
 			led_classdev_unregister(&priv->bicolor_cdev);
 		for (i = 0; i < MAX_LEDS; i++)
