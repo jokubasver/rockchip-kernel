@@ -841,11 +841,13 @@ config BATTERY_RK817
 
 config BATTERY_RK817_ARKOS4CLONE
 	bool "ArkOS4Clone RK817 battery gauge"
-	depends on BATTERY_RK817
+	depends on BATTERY_RK817=y
 	help
 	  Use the ArkOS4Clone hybrid voltage and coulomb-counting gauge
 	  instead of the standard Rockchip RK817 battery gauge. The
-	  learned voltage calibration is stored in /var/lib/rk817_battery_calib.
+	  learned voltage calibration is exposed through the
+	  rk817_calibration sysfs attribute of the rk817-battery device;
+	  userspace saves it and writes it back after boot.
 
 config CHARGER_RK817
 	tristate "RK817 Charger driver"
