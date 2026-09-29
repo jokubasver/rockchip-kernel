@@ -1,10 +1,47 @@
 # SPDX-License-Identifier: GPL-2.0-only
 config RTW88_R36S
-	tristate "Realtek RTL8821CU USB Wi-Fi for R36S clone"
+	tristate "Realtek rtw88 USB Wi-Fi backport for R36S clone"
 	depends on USB && MAC80211 && CFG80211 && LEDS_CLASS
 	# Exports the same symbols as the in-tree PCIe rtw88 driver.
 	depends on RTW88=n
 	select FW_LOADER
 	help
-	  Build the four-module rtw88 RTL8821CU USB backport used by the
-	  R36S clone. Requires rtw8821c_fw.bin in /lib/firmware/rtw88.
+	  Build the USB subset of the out-of-tree lwfinger/rtw88 driver
+	  used by the R36S clone. The rtw_core, rtw_usb, rtw_8821c and
+	  rtw_8821cu (RTL8821CU/RTL8811CU) modules are always built; the
+	  options below add further USB chips.
+
+	  Firmware is loaded from /lib/firmware/rtw88; each chip needs its
+	  own rtw88/rtw<chip>_fw.bin file (rtw8821c_fw.bin for RTL8821CU).
+
+if RTW88_R36S
+
+config RTW88_R36S_8822BU
+	bool "RTL8822BU / RTL8812BU USB support"
+	default y
+	help
+	  Build rtw_8822b and rtw_8822bu for RTL8822BU and RTL8812BU
+	  802.11ac USB adapters. Requires rtw88/rtw8822b_fw.bin.
+
+config RTW88_R36S_8723DU
+	bool "RTL8723DU USB support"
+	default y
+	help
+	  Build rtw_8723x, rtw_8723d and rtw_8723du for RTL8723DU
+	  802.11n USB adapters. Requires rtw88/rtw8723d_fw.bin.
+
+config RTW88_R36S_8812AU
+	bool "RTL8812AU USB support"
+	default y
+	help
+	  Build rtw_88xxa, rtw_8812a and rtw_8812au for RTL8812AU
+	  802.11ac USB adapters. Requires rtw88/rtw8812a_fw.bin.
+
+config RTW88_R36S_8821AU
+	bool "RTL8821AU / RTL8811AU USB support"
+	default y
+	help
+	  Build rtw_88xxa, rtw_8821a and rtw_8821au for RTL8821AU and
+	  RTL8811AU 802.11ac USB adapters. Requires rtw88/rtw8821a_fw.bin.
+
+endif
