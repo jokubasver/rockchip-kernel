@@ -2667,8 +2667,8 @@ next_child:
 		goto put_child;
 	}
 
-	/* Attributes */
-	ret = sysfs_create_group(&dev->kobj, &usb2_phy_attr_group);
+	/* Attributes, removed by devres on unbind or probe failure */
+	ret = devm_device_add_group(dev, &usb2_phy_attr_group);
 	if (ret) {
 		dev_err(dev, "Cannot create sysfs group: %d\n", ret);
 		goto put_child;
