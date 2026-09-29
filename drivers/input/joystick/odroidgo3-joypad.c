@@ -52,6 +52,13 @@
 #define	ADC_DATA_TUNING(x, p)	((x * p) / 100)
 #define	ADC_TUNING_DEFAULT	180
 #define	CLAMP(x, low, high)  (((x) > (high)) ? (high) : (((x) < (low)) ? (low) : (x)))
+/* sysfs 调谐值上限 (百分比), 保证 ADC_DATA_TUNING 不溢出 */
+#define	ADC_TUNING_MAX		10000
+
+/* 轮询间隔范围 (ms), 0 会让轮询 work 空转占满 CPU */
+#define	JOYPAD_POLL_MIN_MS	1
+#define	JOYPAD_POLL_MAX_MS	1000
+#define	JOYPAD_POLL_DEFAULT_MS	10
 
 /*----------------------------------------------------------------------------*/
 /* 摇杆切换功能：L3/R3 按键码 */
@@ -180,6 +187,7 @@ struct joypad {
 	/* 摇杆切换功能（按住切换键时左摇杆→右摇杆） */
 	int stick_switch_code;		/* 切换键的 linux code */
 	bool stick_switch_active;	/* 切换键是否按下 */
+	bool stick_switch_dt;		/* DTS 中配置了 stick-switch-key */
 };
 
 /* ---------- 振动辅助函数 (GPIO + PWM 备选) ---------- */
@@ -191,7 +199,7 @@ struct joypad {
  */
 static int pwm_vibrator_start(struct joypad *joypad)
 {
-	struct device *pdev = joypad->input->dev.parent;
+	struct device *pdev = joypad->dev;
 	struct pwm_state state;
 	int err;
 
@@ -274,41 +282,42 @@ static unsigned int g_button_adc_flat = 0;
 static unsigned int g_button_adc_scale = 0;
 static unsigned int g_button_adc_deadzone = 0;
 
-static int button_adc_fuzz(char *str)
+/* __setup 仅在内建时生效; 模块编译时这些参数始终为0 */
+#ifndef MODULE
+/* 返回1表示已处理, 返回0参数会被传给 init 作为参数/环境变量 */
+static int __init joypad_setup_uint(char *str, unsigned int *val,
+				    const char *name)
 {
-	if (!str)
-		return -EINVAL;
-	g_button_adc_fuzz = simple_strtoul(str, NULL, 10);
-	return 0;
+	if (!str || kstrtouint(str, 10, val))
+		pr_warn(DRV_NAME ": invalid %s%s\n", name, str ? str : "");
+	return 1;
+}
+
+static int __init button_adc_fuzz(char *str)
+{
+	return joypad_setup_uint(str, &g_button_adc_fuzz, "button-adc-fuzz=");
 }
 __setup("button-adc-fuzz=", button_adc_fuzz);
 
-static int button_adc_flat(char *str)
+static int __init button_adc_flat(char *str)
 {
-	if (!str)
-		return -EINVAL;
-	g_button_adc_flat = simple_strtoul(str, NULL, 10);
-	return 0;
+	return joypad_setup_uint(str, &g_button_adc_flat, "button-adc-flat=");
 }
 __setup("button-adc-flat=", button_adc_flat);
 
-static int button_adc_scale(char *str)
+static int __init button_adc_scale(char *str)
 {
-	if (!str)
-		return -EINVAL;
-	g_button_adc_scale = simple_strtoul(str, NULL, 10);
-	return 0;
+	return joypad_setup_uint(str, &g_button_adc_scale, "button-adc-scale=");
 }
 __setup("button-adc-scale=", button_adc_scale);
 
-static int button_adc_deadzone(char *str)
+static int __init button_adc_deadzone(char *str)
 {
-	if (!str)
-		return -EINVAL;
-	g_button_adc_deadzone = simple_strtoul(str, NULL, 10);
-	return 0;
+	return joypad_setup_uint(str, &g_button_adc_deadzone,
+				 "button-adc-deadzone=");
 }
 __setup("button-adc-deadzone=", button_adc_deadzone);
+#endif /* !MODULE */
 
 /*----------------------------------------------------------------------------*/
 /*----------------------------------------------------------------------------*/
@@ -413,10 +422,23 @@ static int joypad_adc_read(struct joypad *joypad, struct bt_adc *adc, int *out_v
 
 /*----------------------------------------------------------------------------*/
 /*----------------------------------------------------------------------------*/
+/* 严格解析十进制无符号数, 超过 max 返回 -EINVAL */
+static int joypad_parse_uint(const char *buf, unsigned int max,
+			     unsigned int *val)
+{
+	int error = kstrtouint(buf, 10, val);
+
+	if (error)
+		return error;
+	return *val > max ? -EINVAL : 0;
+}
+
+/*----------------------------------------------------------------------------*/
 /*
  * 属性:
  *
  * /sys/devices/platform/odroidgo2_joypad/poll_interval [读写]
+ * 范围 JOYPAD_POLL_MIN_MS ~ JOYPAD_POLL_MAX_MS
  */
 /*----------------------------------------------------------------------------*/
 static ssize_t joypad_store_poll_interval(struct device *dev,
@@ -426,9 +448,17 @@ static ssize_t joypad_store_poll_interval(struct device *dev,
 {
 	struct platform_device *pdev  = to_platform_device(dev);
 	struct joypad *joypad = platform_get_drvdata(pdev);
+	unsigned int val;
+	int error;
+
+	error = joypad_parse_uint(buf, JOYPAD_POLL_MAX_MS, &val);
+	if (error)
+		return error;
+	if (val < JOYPAD_POLL_MIN_MS)
+		return -EINVAL;
 
 	mutex_lock(&joypad->lock);
-	joypad->poll_interval = simple_strtoul(buf, NULL, 10);
+	joypad->poll_interval = val;
 	mutex_unlock(&joypad->lock);
 
 	return count;
@@ -471,6 +501,30 @@ static ssize_t joypad_show_adc_fuzz(struct device *dev,
 
 /*----------------------------------------------------------------------------*/
 #if JOYPAD_DEBUG_TUNING
+/*
+ * 将 fuzz/flat 应用到已注册的摇杆轴 (与 EVIOCSABS 一样在 event_lock 下修改).
+ * fuzz 立即生效; flat 对新打开的 evdev 客户端可见, joydev 在重新连接时读取.
+ * 调用者持有 joypad->lock.
+ */
+static void joypad_apply_abs_filter(struct joypad *joypad)
+{
+	static const unsigned int axes[] = { ABS_X, ABS_Y, ABS_RX, ABS_RY };
+	struct input_dev *input = joypad->input;
+	int i;
+
+	if (!input || !input->absinfo)
+		return;
+
+	spin_lock_irq(&input->event_lock);
+	for (i = 0; i < ARRAY_SIZE(axes); i++) {
+		if (!test_bit(axes[i], input->absbit))
+			continue;
+		input->absinfo[axes[i]].fuzz = joypad->bt_adc_fuzz;
+		input->absinfo[axes[i]].flat = joypad->bt_adc_flat;
+	}
+	spin_unlock_irq(&input->event_lock);
+}
+
 static ssize_t joypad_store_adc_fuzz(struct device *dev,
 				      struct device_attribute *attr,
 				      const char *buf,
@@ -478,9 +532,16 @@ static ssize_t joypad_store_adc_fuzz(struct device *dev,
 {
 	struct platform_device *pdev  = to_platform_device(dev);
 	struct joypad *joypad = platform_get_drvdata(pdev);
+	unsigned int val;
+	int error;
+
+	error = joypad_parse_uint(buf, INT_MAX, &val);
+	if (error)
+		return error;
 
 	mutex_lock(&joypad->lock);
-	joypad->bt_adc_fuzz = simple_strtoul(buf, NULL, 10);
+	joypad->bt_adc_fuzz = val;
+	joypad_apply_abs_filter(joypad);
 	mutex_unlock(&joypad->lock);
 
 	return count;
@@ -524,9 +585,16 @@ static ssize_t joypad_store_adc_flat(struct device *dev,
 {
 	struct platform_device *pdev  = to_platform_device(dev);
 	struct joypad *joypad = platform_get_drvdata(pdev);
+	unsigned int val;
+	int error;
+
+	error = joypad_parse_uint(buf, INT_MAX, &val);
+	if (error)
+		return error;
 
 	mutex_lock(&joypad->lock);
-	joypad->bt_adc_flat = simple_strtoul(buf, NULL, 10);
+	joypad->bt_adc_flat = val;
+	joypad_apply_abs_filter(joypad);
 	mutex_unlock(&joypad->lock);
 
 	return count;
@@ -570,9 +638,15 @@ static ssize_t joypad_store_adc_deadzone(struct device *dev,
 {
 	struct platform_device *pdev  = to_platform_device(dev);
 	struct joypad *joypad = platform_get_drvdata(pdev);
+	unsigned int val;
+	int error;
+
+	error = joypad_parse_uint(buf, INT_MAX, &val);
+	if (error)
+		return error;
 
 	mutex_lock(&joypad->lock);
-	joypad->bt_adc_deadzone = simple_strtoul(buf, NULL, 10);
+	joypad->bt_adc_deadzone = val;
 	mutex_unlock(&joypad->lock);
 
 	return count;
@@ -602,9 +676,15 @@ static ssize_t joypad_store_enable(struct device *dev,
 {
 	struct platform_device *pdev  = to_platform_device(dev);
 	struct joypad *joypad = platform_get_drvdata(pdev);
+	unsigned int val;
+	int error;
+
+	error = kstrtouint(buf, 10, &val);
+	if (error)
+		return error;
 
 	mutex_lock(&joypad->lock);
-	joypad->enable = simple_strtoul(buf, NULL, 10);
+	joypad->enable = val;
 	mutex_unlock(&joypad->lock);
 
 	return count;
@@ -640,11 +720,15 @@ static ssize_t joypad_store_adc_cal(struct device *dev,
 {
 	struct platform_device *pdev  = to_platform_device(dev);
 	struct joypad *joypad = platform_get_drvdata(pdev);
-	bool calibration;
+	unsigned int calibration;
+	int error;
+
 	if (!joypad->amux_count)
 		return count;
 
-	calibration = simple_strtoul(buf, NULL, 10);
+	error = kstrtouint(buf, 10, &calibration);
+	if (error)
+		return error;
 
 	if (calibration) {
 		int nbtn;
@@ -739,14 +823,23 @@ static ssize_t joypad_store_amux_debug(struct device *dev,
 {
 	struct platform_device *pdev  = to_platform_device(dev);
 	struct joypad *joypad = platform_get_drvdata(pdev);
+	unsigned int ch;
+	int error;
+
 	if (!joypad->amux_count)
 		return count;
 
-	joypad->debug_ch = simple_strtoul(buf, NULL, 10);
+	error = kstrtouint(buf, 10, &ch);
+	if (error)
+		return error;
 
-	/* 如果出错则使用默认设置(debug_ch = 0) */
-	if (joypad->debug_ch > joypad->amux_count)
-		joypad->debug_ch = 0;
+	/* 超出范围则使用默认设置(debug_ch = 0) */
+	if (ch >= joypad->amux_count)
+		ch = 0;
+
+	mutex_lock(&joypad->lock);
+	joypad->debug_ch = ch;
+	mutex_unlock(&joypad->lock);
 
 	return count;
 }
@@ -817,13 +910,21 @@ static ssize_t joypad_store_period(struct device *dev,
 {
 	struct platform_device *pdev  = to_platform_device(dev);
 	struct joypad *joypad = platform_get_drvdata(pdev);
+	u64 period;
+	int error;
+
+	if (IS_ERR_OR_NULL(joypad->pwm))
+		return -ENODEV;
+
+	/* 周期为0时 pwm_apply_state 会失败 */
+	error = kstrtou64(buf, 10, &period);
+	if (error)
+		return error;
+	if (!period)
+		return -EINVAL;
 
 	mutex_lock(&joypad->lock);
-	if (IS_ERR_OR_NULL(joypad->pwm)) {
-		mutex_unlock(&joypad->lock);
-		return -ENODEV;
-	}
-	pwm_set_period(joypad->pwm, simple_strtoul(buf, NULL, 10));
+	pwm_set_period(joypad->pwm, period);
 	mutex_unlock(&joypad->lock);
 
 	return count;
@@ -864,9 +965,15 @@ static ssize_t joypad_store_boost_strong(struct device *dev,
 {
 	struct platform_device *pdev  = to_platform_device(dev);
 	struct joypad *joypad = platform_get_drvdata(pdev);
+	u16 val;
+	int error;
+
+	error = kstrtou16(buf, 10, &val);
+	if (error)
+		return error;
 
 	mutex_lock(&joypad->lock);
-	joypad->boost_strong = simple_strtoul(buf, NULL, 10);
+	joypad->boost_strong = val;
 	mutex_unlock(&joypad->lock);
 
 	return count;
@@ -902,9 +1009,15 @@ static ssize_t joypad_store_boost_weak(struct device *dev,
 {
 	struct platform_device *pdev  = to_platform_device(dev);
 	struct joypad *joypad = platform_get_drvdata(pdev);
+	u16 val;
+	int error;
+
+	error = kstrtou16(buf, 10, &val);
+	if (error)
+		return error;
 
 	mutex_lock(&joypad->lock);
-	joypad->boost_weak = simple_strtoul(buf, NULL, 10);
+	joypad->boost_weak = val;
 	mutex_unlock(&joypad->lock);
 
 	return count;
@@ -936,13 +1049,20 @@ static DEVICE_ATTR(rumble_boost_weak, S_IWUSR | S_IRUGO,
  *
  * 写入: echo "x_p 200" > /sys/devices/platform/odroidgo3_joypad/joypad_tuning
  *   键: x_p, x_n, y_p, y_n, rx_p, rx_n, ry_p, ry_n
+ *   值: 0 ~ ADC_TUNING_MAX (0 = 不调整)
+ *
+ * 按上报轴类型查找ADC (direct-adc 下 adcs[0]/[1] 为 X/Y, 不是 RY/RX).
  */
-static const char * const tuning_names[] = {
-	"ry_p", "ry_n", "rx_p", "rx_n",
-	"y_p",  "y_n",  "x_p",  "x_n",
+static const struct {
+	const char *name;
+	int axis;
+	bool is_p;
+} tuning_keys[] = {
+	{ "ry_p", ABS_RY, true }, { "ry_n", ABS_RY, false },
+	{ "rx_p", ABS_RX, true }, { "rx_n", ABS_RX, false },
+	{ "y_p",  ABS_Y,  true }, { "y_n",  ABS_Y,  false },
+	{ "x_p",  ABS_X,  true }, { "x_n",  ABS_X,  false },
 };
-static const int tuning_adc_idx[] = { 0, 0, 1, 1, 2, 2, 3, 3 };
-static const bool tuning_is_p[] =   { 1, 0, 1, 0, 1, 0, 1, 0 };
 
 static ssize_t joypad_show_tuning(struct device *dev,
 				  struct device_attribute *attr, char *buf)
@@ -981,22 +1101,30 @@ static ssize_t joypad_store_tuning(struct device *dev,
 	struct joypad *joypad = platform_get_drvdata(pdev);
 	struct bt_adc *adc;
 	char key[8];
-	int val, i;
+	int val, i, n;
 
 	if (sscanf(buf, "%7s %d", key, &val) != 2)
 		return -EINVAL;
+	if (val < 0 || val > ADC_TUNING_MAX || !joypad->adcs)
+		return -EINVAL;
 
-	for (i = 0; i < ARRAY_SIZE(tuning_names); i++) {
-		if (!joypad->adcs || tuning_adc_idx[i] >= joypad->amux_count)
-			continue;
-		if (strcmp(key, tuning_names[i]))
+	for (i = 0; i < ARRAY_SIZE(tuning_keys); i++)
+		if (!strcmp(key, tuning_keys[i].name))
+			break;
+	if (i == ARRAY_SIZE(tuning_keys))
+		return -EINVAL;
+
+	for (n = 0; n < joypad->amux_count; n++) {
+		adc = &joypad->adcs[n];
+		if (adc->report_type != tuning_keys[i].axis)
 			continue;
 
-		adc = &joypad->adcs[tuning_adc_idx[i]];
-		if (tuning_is_p[i])
+		mutex_lock(&joypad->lock);
+		if (tuning_keys[i].is_p)
 			adc->tuning_p = val;
 		else
 			adc->tuning_n = val;
+		mutex_unlock(&joypad->lock);
 		return count;
 	}
 	return -EINVAL;
@@ -1033,13 +1161,20 @@ static ssize_t joypad_store_stick_switch_key(struct device *dev,
 {
 	struct platform_device *pdev  = to_platform_device(dev);
 	struct joypad *joypad = platform_get_drvdata(pdev);
+	unsigned int code;
+	int error;
 
 	/* 仅当DTS中配置了stick-switch-key时允许写入 */
-	if (!joypad->stick_switch_code)
+	if (!joypad->stick_switch_dt)
 		return -EPERM;
 
+	/* 0 或 >= KEY_CNT (如用户态的 999 哨兵值) 表示未绑定, 原样保存 */
+	error = joypad_parse_uint(buf, INT_MAX, &code);
+	if (error)
+		return error;
+
 	mutex_lock(&joypad->lock);
-	joypad->stick_switch_code = simple_strtoul(buf, NULL, 10);
+	joypad->stick_switch_code = code;
 	mutex_unlock(&joypad->lock);
 
 	return count;
@@ -1199,9 +1334,8 @@ static struct attribute *joypad_attrs[] = {
 	NULL,
 };
 
-static struct attribute_group joypad_attr_group = {
-	.attrs = joypad_attrs,
-};
+/* 通过 driver.dev_groups 注册: 探测成功后创建, 解绑时在释放资源前删除 */
+ATTRIBUTE_GROUPS(joypad);
 
 /*----------------------------------------------------------------------------*/
 /*----------------------------------------------------------------------------*/
@@ -1412,8 +1546,9 @@ static void joypad_adc_report_pair(struct joypad *joypad,
 	adcx->value -= adcx->cal;
 	adcy->value -= adcy->cal;
 
-	/* 径向死区 */
-	mag = int_sqrt((adcx->value * adcx->value) + (adcy->value * adcy->value));
+	/* 径向死区 (64位计算, button-adc-scale 较大时平方和会溢出 int) */
+	mag = int_sqrt64((s64)adcx->value * adcx->value +
+			 (s64)adcy->value * adcy->value);
 	if (deadzone && mag <= deadzone) {
 		adcx->value = 0;
 		adcy->value = 0;
@@ -1531,19 +1666,16 @@ static void joypad_stick_switch_update(struct joypad *joypad,
 				       struct input_polled_dev *poll_dev)
 {
 	struct input_dev *input = poll_dev->input;
+	unsigned int code = joypad->stick_switch_code;
 
-	/* 未配置切换键 */
-	if (!joypad->stick_switch_code)
-		return;
-
-	/* 超出有效按键码范围（如用户态的 999 哨兵值）视为未绑定 */
-	if (joypad->stick_switch_code >= KEY_CNT) {
+	/* 未配置/未绑定 (0 或超出有效按键码范围, 如用户态的 999 哨兵值) */
+	if (!code || code >= KEY_CNT) {
 		joypad->stick_switch_active = false;
 		return;
 	}
 
 	/* 检测按键状态并保存 */
-	joypad->stick_switch_active = test_bit(joypad->stick_switch_code, input->key);
+	joypad->stick_switch_active = test_bit(code, input->key);
 }
 
 /*----------------------------------------------------------------------------*/
@@ -1562,6 +1694,9 @@ static void joypad_poll(struct input_polled_dev *poll_dev)
 {
 	struct joypad *joypad = poll_dev->private;
 
+	/* 与 sysfs (adc_cal/amux_debug/调谐等) 互斥: 共享AMUX和校准数据 */
+	mutex_lock(&joypad->lock);
+
 	if (joypad->enable) {
 		/* 1. 更新摇杆切换键状态（必须在上报之前） */
 		joypad_stick_switch_update(joypad, poll_dev);
@@ -1578,11 +1713,10 @@ static void joypad_poll(struct input_polled_dev *poll_dev)
 	}
 
 	/* 如果通过sysfs更改了轮询间隔则更新 */
-	if (poll_dev->poll_interval != joypad->poll_interval) {
-		mutex_lock(&joypad->lock);
+	if (poll_dev->poll_interval != joypad->poll_interval)
 		poll_dev->poll_interval = joypad->poll_interval;
-		mutex_unlock(&joypad->lock);
-	}
+
+	mutex_unlock(&joypad->lock);
 }
 
 /*----------------------------------------------------------------------------*/
@@ -1598,10 +1732,20 @@ static void joypad_open(struct input_polled_dev *poll_dev)
 	struct joypad *joypad = poll_dev->private;
 	int nbtn;
 
-	/* 初始化GPIO按钮状态为释放 */
+	/* 校准期间与 sysfs 的 adc_cal/amux_debug 互斥 */
+	mutex_lock(&joypad->lock);
+
+	/*
+	 * 初始化按钮状态为释放: GPIO按键保存引脚电平,
+	 * ADC按键保存 "是否按下".
+	 */
 	for (nbtn = 0; nbtn < joypad->bt_gpio_count; nbtn++) {
 		struct bt_gpio *gpio = &joypad->gpios[nbtn];
-		gpio->old_value = gpio->active_level ? 0 : 1;
+
+		if (gpio->is_adc)
+			gpio->old_value = false;
+		else
+			gpio->old_value = gpio->active_level ? 0 : 1;
 	}
 
 	/* 通过读取初始中心值校准ADC轴，并直接上报初始位置 */
@@ -1675,7 +1819,6 @@ static void joypad_open(struct input_polled_dev *poll_dev)
 	input_sync(poll_dev->input);
 
 	/* 启用轮询 */
-	mutex_lock(&joypad->lock);
 	joypad->enable = true;
 	mutex_unlock(&joypad->lock);
 
@@ -1737,18 +1880,19 @@ static int joypad_amux_setup(struct device *dev, struct joypad *joypad)
 	if (joypad->split_adc_mode) {
 		/* 分离ADC: 左右摇杆使用独立通道 */
 		amux->iio_ch = devm_iio_channel_get(dev, "joy_left");
+		if (IS_ERR(amux->iio_ch))
+			return dev_err_probe(dev, PTR_ERR(amux->iio_ch),
+					     "split-adc: joy_left iio channel get error\n");
 		amux->iio_ch_r = devm_iio_channel_get(dev, "joy_right");
-		if (IS_ERR(amux->iio_ch) || IS_ERR(amux->iio_ch_r)) {
-			dev_err(dev, "split-adc: iio channel get error\n");
-			return -EINVAL;
-		}
+		if (IS_ERR(amux->iio_ch_r))
+			return dev_err_probe(dev, PTR_ERR(amux->iio_ch_r),
+					     "split-adc: joy_right iio channel get error\n");
 	} else {
 		/* 传统模式: 通过AMUX的单ADC通道 */
 		amux->iio_ch = devm_iio_channel_get(dev, "amux_adc");
-		if (IS_ERR(amux->iio_ch)) {
-			dev_err(dev, "iio channel get error\n");
-			return -EINVAL;
-		}
+		if (IS_ERR(amux->iio_ch))
+			return dev_err_probe(dev, PTR_ERR(amux->iio_ch),
+					     "iio channel get error\n");
 	}
 
 	/* 验证IIO通道 */
@@ -1766,6 +1910,8 @@ static int joypad_amux_setup(struct device *dev, struct joypad *joypad)
 	/* 设置选择A GPIO (AMUX地址位0) */
 	amux->sel_a_gpio = of_get_named_gpio_flags(dev->of_node,
 				"amux-a-gpios", 0, &flags);
+	if (amux->sel_a_gpio == -EPROBE_DEFER)
+		return dev_err_probe(dev, -EPROBE_DEFER, "amux-a-gpios not ready\n");
 	if (gpio_is_valid(amux->sel_a_gpio)) {
 		ret = devm_gpio_request(dev, amux->sel_a_gpio, "amux-sel-a");
 		if (ret < 0) {
@@ -1781,6 +1927,8 @@ static int joypad_amux_setup(struct device *dev, struct joypad *joypad)
 	/* 设置选择B GPIO (AMUX地址位1) */
 	amux->sel_b_gpio = of_get_named_gpio_flags(dev->of_node,
 				"amux-b-gpios", 0, &flags);
+	if (amux->sel_b_gpio == -EPROBE_DEFER)
+		return dev_err_probe(dev, -EPROBE_DEFER, "amux-b-gpios not ready\n");
 	if (gpio_is_valid(amux->sel_b_gpio)) {
 		ret = devm_gpio_request(dev, amux->sel_b_gpio, "amux-sel-b");
 		if (ret < 0) {
@@ -1796,6 +1944,8 @@ static int joypad_amux_setup(struct device *dev, struct joypad *joypad)
 	/* 设置使能GPIO (可选, 低电平有效) */
 	amux->en_gpio = of_get_named_gpio_flags(dev->of_node,
 			"amux-en-gpios", 0, &flags);
+	if (amux->en_gpio == -EPROBE_DEFER)
+		return dev_err_probe(dev, -EPROBE_DEFER, "amux-en-gpios not ready\n");
 	if (gpio_is_valid(amux->en_gpio)) {
 		ret = devm_gpio_request(dev, amux->en_gpio, "amux-en");
 		if (ret < 0) {
@@ -1832,10 +1982,9 @@ static int joypad_adc_setup_direct(struct device *dev, struct joypad *joypad)
 	/* 轴0: X */
 	adc = &joypad->adcs[0];
 	adc->channel = devm_iio_channel_get(dev, "joy_x");
-	if (IS_ERR(adc->channel)) {
-		dev_err(dev, "direct-adc: iio channel 'joy_x' get error\n");
-		return -EINVAL;
-	}
+	if (IS_ERR(adc->channel))
+		return dev_err_probe(dev, PTR_ERR(adc->channel),
+				     "direct-adc: iio channel 'joy_x' get error\n");
 	if (!adc->channel->indio_dev)
 		return -ENXIO;
 	if (iio_get_channel_type(adc->channel, &type))
@@ -1863,10 +2012,9 @@ static int joypad_adc_setup_direct(struct device *dev, struct joypad *joypad)
 	/* 轴1: Y */
 	adc = &joypad->adcs[1];
 	adc->channel = devm_iio_channel_get(dev, "joy_y");
-	if (IS_ERR(adc->channel)) {
-		dev_err(dev, "direct-adc: iio channel 'joy_y' get error\n");
-		return -EINVAL;
-	}
+	if (IS_ERR(adc->channel))
+		return dev_err_probe(dev, PTR_ERR(adc->channel),
+				     "direct-adc: iio channel 'joy_y' get error\n");
 	if (!adc->channel->indio_dev)
 		return -ENXIO;
 	if (iio_get_channel_type(adc->channel, &type))
@@ -2047,6 +2195,7 @@ static int joypad_gpio_setup(struct device *dev, struct joypad *joypad)
 	for_each_child_of_node(node, pp) {
 		if (of_find_property(pp, "adc-key", NULL)) {
 			has_adc_key = true;
+			of_node_put(pp);
 			break;
 		}
 	}
@@ -2054,10 +2203,9 @@ static int joypad_gpio_setup(struct device *dev, struct joypad *joypad)
 	/* 如果需要, 获取ADC按键的共享ADC通道 */
 	if (has_adc_key) {
 		joypad->adc_key_channel = devm_iio_channel_get(dev, "adc-key");
-		if (IS_ERR(joypad->adc_key_channel)) {
-			dev_err(dev, "Failed to get adc-key io-channel\n");
-			return -EINVAL;
-		}
+		if (IS_ERR(joypad->adc_key_channel))
+			return dev_err_probe(dev, PTR_ERR(joypad->adc_key_channel),
+					     "Failed to get adc-key io-channel\n");
 		joypad->has_adc_keys = true;
 		dev_info(dev, "ADC key channel initialized\n");
 	}
@@ -2082,6 +2230,7 @@ static int joypad_gpio_setup(struct device *dev, struct joypad *joypad)
 			/* ADC按键设置 */
 			if (of_property_read_u32(pp, "adc_value", &gpio->adc_value)) {
 				dev_err(dev, "ADC key without adc_value\n");
+				of_node_put(pp);
 				return -EINVAL;
 			}
 			/* 如果未指定则默认 fuzz = 20 */
@@ -2110,10 +2259,10 @@ static int joypad_gpio_setup(struct device *dev, struct joypad *joypad)
 
 			gpio->num = of_get_gpio_flags(pp, 0, &flags);
 			if (gpio->num < 0) {
-				error = gpio->num;
-				dev_err(dev, "Failed to get gpio flags, error: %d\n",
-					error);
-				return error;
+				/* GPIO控制器未就绪时为 -EPROBE_DEFER */
+				of_node_put(pp);
+				return dev_err_probe(dev, gpio->num,
+						     "Failed to get gpio flags\n");
 			}
 
 			/* gpio有效电平(按键按下电平) */
@@ -2126,6 +2275,7 @@ static int joypad_gpio_setup(struct device *dev, struct joypad *joypad)
 					dev_err(dev,
 						"Failed to request GPIO %d, error %d\n",
 						gpio->num, error);
+					of_node_put(pp);
 					return error;
 				}
 			}
@@ -2141,6 +2291,7 @@ static int joypad_gpio_setup(struct device *dev, struct joypad *joypad)
 			} else {
 				dev_err(dev, "Button without keycode: 0x%x\n",
 					gpio->num);
+				of_node_put(pp);
 				return -EINVAL;
 			}
 		}
@@ -2208,10 +2359,11 @@ static int joypad_rumble_setup(struct device *dev, struct joypad *joypad)
 	joypad->pwm = devm_pwm_get(dev, "enable");
 	if (IS_ERR(joypad->pwm))
 	{
+		err = PTR_ERR(joypad->pwm);
 		/* Boards without rumble must not keep the ERR_PTR. */
 		joypad->pwm = NULL;
-		dev_err(dev, "rumble get error\n");
-		return -EINVAL;
+		/* 保留真实错误码, 调用者需区分 -EPROBE_DEFER */
+		return dev_err_probe(dev, err, "rumble get error\n");
 	}
 
 	/* 同步PWM状态并确保其关闭. */
@@ -2269,12 +2421,16 @@ static int joypad_input_setup(struct device *dev, struct joypad *joypad)
 		__set_bit(EV_ABS, input->evbit);
 		for (nbtn = 0; nbtn < joypad->amux_count; nbtn++) {
 			struct bt_adc *adc = &joypad->adcs[nbtn];
-			/* 不为跳过的右摇杆对注册ABS能力 */
-			if (joypad->skip_absr && (nbtn == 0 || nbtn == 1))
-				continue;
-			/* 不为跳过的左摇杆对注册ABS能力 */
-			if (joypad->skip_absl && (nbtn == 2 || nbtn == 3))
-				continue;
+
+			/* 直接ADC模式固定为 X/Y, 与轮询/校准一致不应用跳过标志 */
+			if (!joypad->direct_adc_mode) {
+				/* 不为跳过的右摇杆对注册ABS能力 */
+				if (joypad->skip_absr && (nbtn == 0 || nbtn == 1))
+					continue;
+				/* 不为跳过的左摇杆对注册ABS能力 */
+				if (joypad->skip_absl && (nbtn == 2 || nbtn == 3))
+					continue;
+			}
 
 			input_set_abs_params(input, adc->report_type,
 					adc->min, adc->max,
@@ -2363,8 +2519,6 @@ static int joypad_input_setup(struct device *dev, struct joypad *joypad)
 
 	if (joypad->auto_repeat)
 		__set_bit(EV_REP, input->evbit);
-
-	joypad->dev = dev;
 
 	error = input_register_polled_device(poll_dev);
 	if (error) {
@@ -2473,8 +2627,14 @@ static void joypad_parse_adc_mode(struct device *dev, struct joypad *joypad)
 		device_property_read_u32(dev, "amux-count", &joypad->amux_count);
 	}
 
-	/* 解析轮询间隔 */
+	/* 解析轮询间隔 (缺失或超出范围时使用默认值, 0 会导致轮询空转) */
 	device_property_read_u32(dev, "poll-interval", &joypad->poll_interval);
+	if (joypad->poll_interval < JOYPAD_POLL_MIN_MS ||
+	    joypad->poll_interval > JOYPAD_POLL_MAX_MS) {
+		dev_warn(dev, "invalid poll-interval %d, using %d ms\n",
+			 joypad->poll_interval, JOYPAD_POLL_DEFAULT_MS);
+		joypad->poll_interval = JOYPAD_POLL_DEFAULT_MS;
+	}
 
 	/* 解析自动重复标志 */
 	joypad->auto_repeat = device_property_present(dev, "autorepeat");
@@ -2507,6 +2667,7 @@ static void joypad_parse_axes_config(struct device *dev, struct joypad *joypad)
 	/* 解析摇杆切换键 */
 	if (device_property_read_u32(dev, "stick-switch-key", &joypad->stick_switch_code))
 		joypad->stick_switch_code = 0;
+	joypad->stick_switch_dt = joypad->stick_switch_code != 0;
 
 	dev_info(dev,
 		"%s: invert-absx=%d, invert-absy=%d, invert-absrx=%d, invert-absry=%d, skip-absr=%d, skip-absl=%d, stick-switch=%d\n",
@@ -2534,6 +2695,8 @@ static int joypad_parse_rumble_gpio(struct device *dev, struct joypad *joypad)
 	int err;
 
 	gpio = of_get_named_gpio_flags(dev->of_node, "rumble-gpio", 0, &gflags);
+	if (gpio == -EPROBE_DEFER)
+		return dev_err_probe(dev, gpio, "rumble-gpio not ready\n");
 	if (!gpio_is_valid(gpio)) {
 		joypad->rumble_gpio = -EINVAL;
 		dev_dbg(dev, "no rumble-gpio; will try PWM\n");
@@ -2660,6 +2823,20 @@ static int __maybe_unused joypad_resume(struct device *dev)
 static SIMPLE_DEV_PM_OPS(joypad_pm_ops,
 			 joypad_suspend, joypad_resume);
 /*----------------------------------------------------------------------------*/
+/*
+ * 解绑/探测失败时的清理 (devm 动作).
+ * 注册在输入设备之前, 因此在输入设备注销 (close 已停止轮询 work) 之后、
+ * PWM/GPIO 释放之前执行.
+ */
+static void joypad_teardown(void *data)
+{
+	struct joypad *joypad = data;
+
+	cancel_work_sync(&joypad->play_work);
+	joypad_vibrator_stop(joypad);
+}
+
+/*----------------------------------------------------------------------------*/
 static int joypad_probe(struct platform_device *pdev)
 {
 	struct joypad *joypad;
@@ -2672,32 +2849,30 @@ static int joypad_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 
+	joypad->dev = dev;
+	mutex_init(&joypad->lock);
+	INIT_WORK(&joypad->play_work, pwm_vibrator_play_work);
+
 	/* 设备树数据解析 */
 	error = joypad_dt_parse(dev, joypad);
 	if (error) {
-		dev_err(dev, "dt parse error!(err = %d)\n", error);
+		if (error != -EPROBE_DEFER)
+			dev_err(dev, "dt parse error!(err = %d)\n", error);
 		return error;
 	}
 
-	mutex_init(&joypad->lock);
 	platform_set_drvdata(pdev, joypad);
-
-	error = sysfs_create_group(&pdev->dev.kobj, &joypad_attr_group);
-	if (error) {
-		dev_err(dev, "create sysfs group fail, error: %d\n",
-			error);
-		return error;
-	}
 
 	/* 震动设置 (可选) - 必须在 input_setup 之前完成
 	 *  - 如果 rumble-gpio 有效: 使用GPIO路径.
-	 *  - 否则: 尝试PWM路径, 但如果不可用不要使探测失败.
+	 *  - 否则: 尝试PWM路径, 但如果不可用不要使探测失败 (-EPROBE_DEFER 除外).
 	 */
-	INIT_WORK(&joypad->play_work, pwm_vibrator_play_work);
 	if (gpio_is_valid(joypad->rumble_gpio)) {
 		joypad->has_rumble = true;
 	} else {
 		error = joypad_rumble_setup(dev, joypad);
+		if (error == -EPROBE_DEFER)
+			return error;
 		if (error) {
 			dev_info(dev, "rumble not available, continuing without rumble support\n");
 			joypad->has_rumble = false;
@@ -2706,20 +2881,28 @@ static int joypad_probe(struct platform_device *pdev)
 		}
 	}
 
-	/* 轮询输入设备设置 */
-	error = joypad_input_setup(dev, joypad);
-	if (error) {
-		dev_err(dev, "input setup failed!(err = %d)\n", error);
+	error = devm_add_action_or_reset(dev, joypad_teardown, joypad);
+	if (error)
 		return error;
-	}
 
-	/* 启动震动: 探测时振动1秒 */
+	/*
+	 * 启动震动: 探测时振动1秒.
+	 * 在注册输入设备之前完成, 使 sysfs 属性 (dev_groups, 探测返回后创建)
+	 * 与输入设备几乎同时出现.
+	 */
 	if (joypad->has_rumble) {
 		joypad->level = 0xFFFF;
 		joypad_vibrator_start(joypad);
 		msleep(1000);
 		joypad_vibrator_stop(joypad);
 		joypad->level = 0;
+	}
+
+	/* 轮询输入设备设置 */
+	error = joypad_input_setup(dev, joypad);
+	if (error) {
+		dev_err(dev, "input setup failed!(err = %d)\n", error);
+		return error;
 	}
 
 	dev_info(dev, "%s : probe success\n", __func__);
@@ -2741,6 +2924,7 @@ static struct platform_driver joypad_driver = {
 		.name = DRV_NAME,
 		.pm = &joypad_pm_ops,
 		.of_match_table = of_match_ptr(joypad_of_match),
+		.dev_groups = joypad_groups,
 	},
 };
 
