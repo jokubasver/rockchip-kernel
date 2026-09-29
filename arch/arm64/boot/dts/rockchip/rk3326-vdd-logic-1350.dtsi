@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * DDR and GPU voltages for boards whose vdd_logic reaches 1.35 V: the ArkOS
+ * 4.4 table from rk3326-vdd-logic-1150.dtsi, with the DMC maximum raised so
+ * 1.032 GHz DDR keeps its 1.2 V OPP. Include after rk3326-oc.dtsi.
+ */
+
+#include "rk3326-vdd-logic-1150.dtsi"
+
+&dmc_opp_table {
+	rockchip,max-volt = <1250000>;
+};

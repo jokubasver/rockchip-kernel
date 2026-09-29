@@ -14,6 +14,7 @@
 #include "rk3326.dtsi"
 #include "rk3326-linux.dtsi"
 #include "rk3326-oc.dtsi"
+#include "rk3326-vdd-logic-1350.dtsi"
 
 / {
 	model = "XiFan R36Max2";
@@ -448,104 +449,9 @@
 	status = "okay";
 };
 
-/*
- * DDR and GPU share vdd_logic, which retains a 1.175 V floor. Keep the OPP
- * maximum above that floor or Rockchip's selector prunes every higher rate.
- */
-&dmc_opp_table {
-	rockchip,max-volt = <1250000>;
-
-	opp-194000000 {
-		opp-microvolt = <1175000>;
-		opp-microvolt-L0 = <1175000>;
-		opp-microvolt-L1 = <1175000>;
-		opp-microvolt-L2 = <1175000>;
-		opp-microvolt-L3 = <1175000>;
-	};
-	opp-328000000 {
-		opp-microvolt = <1175000>;
-		opp-microvolt-L0 = <1175000>;
-		opp-microvolt-L1 = <1175000>;
-		opp-microvolt-L2 = <1175000>;
-		opp-microvolt-L3 = <1175000>;
-	};
-	opp-450000000 {
-		opp-microvolt = <1175000>;
-		opp-microvolt-L0 = <1175000>;
-		opp-microvolt-L1 = <1175000>;
-		opp-microvolt-L2 = <1175000>;
-		opp-microvolt-L3 = <1175000>;
-	};
-	opp-666000000 {
-		opp-microvolt = <1175000>;
-		opp-microvolt-L0 = <1175000>;
-		opp-microvolt-L1 = <1175000>;
-		opp-microvolt-L2 = <1175000>;
-		opp-microvolt-L3 = <1175000>;
-	};
-	opp-786000000 {
-		opp-microvolt = <1175000>;
-		opp-microvolt-L0 = <1175000>;
-		opp-microvolt-L1 = <1175000>;
-		opp-microvolt-L2 = <1175000>;
-		opp-microvolt-L3 = <1175000>;
-		status = "okay";
-	};
-};
-
-
 &gpu {
 	mali-supply = <&vdd_logic>;
 	status = "okay";
-};
-
-/*
- * GPU and DMC share vdd_logic, which retains a 1.175 V floor.
- * Match every GPU OPP to that floor; otherwise the regulator rejects the
- * entire table and Mali remains fixed at 200 MHz without devfreq.
- * With the current PLL parents the clock can reach 600 MHz, but 560 MHz
- * rounds to 520 MHz and 640 MHz rounds to 600 MHz. Keep only real steps.
- * Leave voltage headroom above the OPP floor: Rockchip's OPP selector
- * otherwise treats 200 MHz as the highest safe rate and prunes the rest.
- */
-&gpu_opp_table {
-	rockchip,max-volt = <1250000>;
-
-	opp-200000000 {
-		opp-microvolt = <1175000>;
-		opp-microvolt-L0 = <1175000>;
-		opp-microvolt-L1 = <1175000>;
-		opp-microvolt-L2 = <1175000>;
-		opp-microvolt-L3 = <1175000>;
-	};
-	opp-300000000 {
-		opp-microvolt = <1175000>;
-		opp-microvolt-L0 = <1175000>;
-		opp-microvolt-L1 = <1175000>;
-		opp-microvolt-L2 = <1175000>;
-		opp-microvolt-L3 = <1175000>;
-	};
-	opp-400000000 {
-		opp-microvolt = <1175000>;
-		opp-microvolt-L0 = <1175000>;
-		opp-microvolt-L1 = <1175000>;
-		opp-microvolt-L2 = <1175000>;
-		opp-microvolt-L3 = <1175000>;
-	};
-	opp-480000000 {
-		opp-microvolt = <1175000>;
-		opp-microvolt-L0 = <1175000>;
-		opp-microvolt-L1 = <1175000>;
-		opp-microvolt-L2 = <1175000>;
-		opp-microvolt-L3 = <1175000>;
-	};
-	opp-520000000 {
-		opp-microvolt = <1175000>;
-		opp-microvolt-L0 = <1175000>;
-		opp-microvolt-L1 = <1175000>;
-		opp-microvolt-L2 = <1175000>;
-		opp-microvolt-L3 = <1175000>;
-	};
 };
 
 &i2c0 {
@@ -637,17 +543,16 @@
 
 		regulators {
 			vdd_logic: DCDC_REG1 {
-				/* Shared DMC/GPU rail floor; their OPPs run at 1.175 V. */
 				regulator-always-on;
 				regulator-boot-on;
-				regulator-min-microvolt = <1175000>;
+				regulator-min-microvolt = <950000>;
 				regulator-max-microvolt = <1350000>;
 				regulator-ramp-delay = <6001>;
 				regulator-initial-mode = <0x2>;
 				regulator-name = "vdd_logic";
 				regulator-state-mem {
 					regulator-on-in-suspend;
-					regulator-suspend-microvolt = <1175000>;
+					regulator-suspend-microvolt = <950000>;
 				};
 			};
 
