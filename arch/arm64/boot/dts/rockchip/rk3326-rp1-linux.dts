@@ -240,7 +240,9 @@
 		rockchip,grf = <&grf>;
 		wifi_chip_type = "esp8089";
 		sdio_vref = <3300>;
-		WIFI,poweren_gpio = <&gpio3 RK_PB6 GPIO_ACTIVE_LOW>;
+		/* 4.4 rfkill left this pin high; drive it there at probe */
+		keep_wifi_power_on;
+		WIFI,poweren_gpio = <&gpio3 RK_PB6 GPIO_ACTIVE_HIGH>;
 		status = "okay";
 	};
 
