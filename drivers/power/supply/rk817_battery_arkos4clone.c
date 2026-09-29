@@ -53,6 +53,8 @@
 #define HYBRID_FULL_CURR_THRESH_MA	150	/* current below this = near full */
 #define HYBRID_FULL_VOLT_THRESH_MV	4050	/* voltage must be above this */
 #define HYBRID_FULL_TIMEOUT_SEC		(20 * 60)	/* 20 min timeout at 99% */
+/* CHARGE_FINISH this long at a full-cell voltage sets the counter to FCC */
+#define HYBRID_FINISH_ANCHOR_SEC	30
 /* Net discharge while plugged in: the charger is losing to the load */
 #define HYBRID_NET_DISCHARGE_MA		50
 /* Under load below power_off_thresd: shut down after this long, or 50 mV lower */
@@ -584,6 +586,8 @@ struct rk817_battery_device {
 	bool				hybrid_full_event;	/* full event active */
 	bool				hybrid_first_run;	/* first iteration flag */
 	int64_t				hybrid_99_start_sec;	/* time when SOC first hit 99% */
+	int64_t				hybrid_finish_start_sec; /* CHARGE_FINISH dwell start */
+	bool				hybrid_fcc_anchored;	/* counter set to FCC this finish */
 	int64_t				lowpwr_start_sec;	/* first loop under load below power_off_thresd */
 	bool				lowpwr_poweroff_sent;
 	int64_t				hybrid_rest_start_sec;	/* rest period start */
@@ -1016,6 +1020,44 @@ static void rk817_hybrid_drift_correct(struct rk817_battery_device *battery,
 	    battery->hybrid_internal_soc, battery->hybrid_drift_pending);
 }
 
+/*
+ * A finished charge is the one point where the SOC is known. As the stock
+ * gauge does, set the coulomb counter to FCC once the charger has reported
+ * CHARGE_FINISH for HYBRID_FINISH_ANCHOR_SEC at a full-cell voltage without
+ * losing to the load. Only once per finish, so a battery that helps a weak
+ * charger still counts down. A counter that ran past FCC is clamped to it.
+ */
+static void rk817_hybrid_fcc_anchor(struct rk817_battery_device *battery,
+				    int ema_mv)
+{
+	int64_t now = rk817_hybrid_boottime_sec();
+
+	if (battery->remain_cap / 1000 > battery->fcc)
+		rk817_bat_init_coulomb_cap(battery, battery->fcc);
+
+	if (battery->chrg_status != CHARGE_FINISH) {
+		battery->hybrid_fcc_anchored = false;
+		battery->hybrid_finish_start_sec = 0;
+		return;
+	}
+	if (battery->hybrid_fcc_anchored)
+		return;
+	if (battery->current_avg < FINISH_CURR_THRESD ||
+	    ema_mv < HYBRID_FULL_VOLT_THRESH_MV) {
+		battery->hybrid_finish_start_sec = 0;
+		return;
+	}
+	if (!battery->hybrid_finish_start_sec)
+		battery->hybrid_finish_start_sec = now;
+	if (now - battery->hybrid_finish_start_sec < HYBRID_FINISH_ANCHOR_SEC)
+		return;
+
+	BAT_INFO("hybrid: charge finished at %d mV, counter %d%% -> 100%%\n",
+		 ema_mv, battery->rsoc / 1000);
+	rk817_bat_init_coulomb_cap(battery, battery->fcc);
+	battery->hybrid_fcc_anchored = true;
+}
+
 static void rk817_hybrid_calculate(struct rk817_battery_device *battery)
 {
 	int raw_mv, ema_mv, soc;
@@ -1085,7 +1127,8 @@ static void rk817_hybrid_calculate(struct rk817_battery_device *battery)
 	full_event = status_full || peak_dwell;
 	allow_100 = full_event || battery->hybrid_full_event;
 
-	/* Step 3: Calculate SOC from coulomb counter */
+	/* Step 3: Calculate SOC from coulomb counter, anchored at charge finish */
+	rk817_hybrid_fcc_anchor(battery, ema_mv);
 	raw_soc_from_coulomb = battery->rsoc / 1000;
 	HYBRID_DBG("hybrid: remain_cap=%d fcc=%d rsoc_hw=%d raw_soc=%d%%\n",
 		 battery->remain_cap, battery->fcc,
