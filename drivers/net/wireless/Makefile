@@ -32,3 +32,4 @@ obj-$(CONFIG_MAC80211_HWSIM)	+= mac80211_hwsim.o
 obj-$(CONFIG_VIRT_WIFI)	+= virt_wifi.o
 obj-$(CONFIG_WL_ROCKCHIP)	+= rockchip_wlan/
 obj-$(CONFIG_ESP8089)	+= esp8089/
+obj-$(CONFIG_WLAN_VENDOR_SWT6621S) += swt6621s_wifi/
