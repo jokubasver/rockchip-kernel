@@ -35,8 +35,13 @@
 #include <video/of_display_timing.h>
 #include <video/videomode.h>
 
+#include <drm/drm_atomic.h>
+#include <drm/drm_atomic_uapi.h>
+#include <drm/drm_client.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_device.h>
+#include <drm/drm_fb_helper.h>
+#include <drm/drm_modeset_lock.h>
 #include <drm/drm_mipi_dsi.h>
 #include <drm/drm_panel.h>
 #include <drm/drm_dsc.h>
@@ -158,6 +163,12 @@ struct panel_simple {
 
 	struct drm_dsc_picture_parameter_set *pps;
 	enum drm_panel_orientation orientation;
+
+	/* every timing of the DT "display-timings" node, switchable in sysfs */
+	struct display_timings *dt_timings;
+	unsigned int cur_timing;
+	/* the connector the modes were last added to */
+	struct drm_connector *connector;
 };
 
 static inline void panel_simple_msleep(unsigned int msecs)
@@ -374,6 +385,44 @@ static unsigned int panel_simple_get_display_modes(struct panel_simple *panel,
 	return num;
 }
 
+static void panel_simple_mode_from_timing(const struct display_timing *dt,
+					  struct drm_display_mode *mode)
+{
+	struct videomode vm;
+
+	videomode_from_timing(dt, &vm);
+	drm_display_mode_from_videomode(&vm, mode);
+	mode->type |= DRM_MODE_TYPE_DRIVER;
+}
+
+/* Every DT timing is a mode; the active one is the preferred mode. */
+static unsigned int panel_simple_get_dt_timings_modes(struct panel_simple *panel,
+						      struct drm_connector *connector)
+{
+	struct display_timings *timings = panel->dt_timings;
+	struct drm_display_mode *mode;
+	unsigned int i, num = 0;
+
+	panel->connector = connector;
+
+	for (i = 0; i < timings->num_timings; i++) {
+		mode = drm_mode_create(connector->dev);
+		if (!mode) {
+			dev_err(panel->base.dev, "failed to add timing %u\n", i);
+			continue;
+		}
+
+		panel_simple_mode_from_timing(timings->timings[i], mode);
+		if (i == panel->cur_timing)
+			mode->type |= DRM_MODE_TYPE_PREFERRED;
+
+		drm_mode_probed_add(connector, mode);
+		num++;
+	}
+
+	return num;
+}
+
 static int panel_simple_get_non_edid_modes(struct panel_simple *panel,
 					   struct drm_connector *connector)
 {
@@ -384,7 +433,9 @@ static int panel_simple_get_non_edid_modes(struct panel_simple *panel,
 	if (!panel->desc)
 		return 0;
 
-	if (has_override) {
+	if (panel->dt_timings) {
+		num = panel_simple_get_dt_timings_modes(panel, connector);
+	} else if (has_override) {
 		mode = drm_mode_duplicate(connector->dev,
 					  &panel->override_mode);
 		if (mode) {
@@ -826,6 +877,268 @@ static const struct backlight_ops dcs_bl_ops = {
 	.get_brightness = dcs_bl_get_brightness,
 };
 
+/*
+ * Runtime switch between the timings of the panel's DT "display-timings"
+ * node (see Documentation/ABI/testing/sysfs-panel-simple-timing): "timings"
+ * lists them, "timing" reads or sets the active one.
+ */
+static unsigned int panel_simple_timing_vrefresh(const struct display_timing *dt)
+{
+	u64 htotal, vtotal;
+
+	htotal = (u64)dt->hactive.typ + dt->hfront_porch.typ +
+		 dt->hsync_len.typ + dt->hback_porch.typ;
+	vtotal = (u64)dt->vactive.typ + dt->vfront_porch.typ +
+		 dt->vsync_len.typ + dt->vback_porch.typ;
+	if (!htotal || !vtotal)
+		return 0;
+
+	return DIV_ROUND_CLOSEST_ULL((u64)dt->pixelclock.typ, htotal * vtotal);
+}
+
+static bool panel_simple_mode_is_timing(const struct drm_display_mode *mode,
+					const struct display_timing *dt)
+{
+	struct drm_display_mode tmp = {};
+
+	panel_simple_mode_from_timing(dt, &tmp);
+
+	return drm_mode_match(mode, &tmp, DRM_MODE_MATCH_TIMINGS |
+					  DRM_MODE_MATCH_CLOCK |
+					  DRM_MODE_MATCH_FLAGS);
+}
+
+/*
+ * The timing the CRTC driving the panel runs. Lockless: a concurrent
+ * modeset can make this stale, which is harmless for a sysfs read.
+ */
+static unsigned int panel_simple_current_timing(struct panel_simple *panel)
+{
+	struct drm_connector *connector = panel->connector;
+	struct drm_crtc *crtc;
+	unsigned int i;
+
+	crtc = connector && connector->state ? connector->state->crtc : NULL;
+	if (!crtc || !crtc->state || !crtc->state->enable)
+		return panel->cur_timing;
+
+	for (i = 0; i < panel->dt_timings->num_timings; i++)
+		if (panel_simple_mode_is_timing(&crtc->state->mode,
+						panel->dt_timings->timings[i]))
+			return i;
+
+	return panel->cur_timing;
+}
+
+/* Make @mode the preferred mode of @connector. */
+static void panel_simple_set_preferred(struct drm_connector *connector,
+				       const struct drm_display_mode *mode)
+{
+	struct drm_display_mode *m;
+
+	mutex_lock(&connector->dev->mode_config.mutex);
+	list_for_each_entry(m, &connector->modes, head) {
+		if (drm_mode_match(m, mode, DRM_MODE_MATCH_TIMINGS |
+					    DRM_MODE_MATCH_CLOCK |
+					    DRM_MODE_MATCH_FLAGS))
+			m->type |= DRM_MODE_TYPE_PREFERRED;
+		else
+			m->type &= ~DRM_MODE_TYPE_PREFERRED;
+	}
+	mutex_unlock(&connector->dev->mode_config.mutex);
+}
+
+/*
+ * The fbdev emulation restores the mode it chose at boot whenever it takes
+ * the display back (no DRM master left, VT switch, resume). Give it the new
+ * mode so the switch survives that.
+ */
+static void panel_simple_update_fbdev_mode(struct drm_connector *connector,
+					   const struct drm_display_mode *mode)
+{
+	struct drm_fb_helper *fb_helper = connector->dev->fb_helper;
+	struct drm_mode_set *modeset;
+	struct drm_display_mode *dup;
+	unsigned int i;
+
+	if (!fb_helper)
+		return;
+
+	mutex_lock(&fb_helper->client.modeset_mutex);
+	drm_client_for_each_modeset(modeset, &fb_helper->client) {
+		for (i = 0; i < modeset->num_connectors; i++) {
+			if (modeset->connectors[i] != connector || !modeset->mode)
+				continue;
+			dup = drm_mode_duplicate(connector->dev, mode);
+			if (!dup)
+				break;
+			drm_mode_destroy(connector->dev, modeset->mode);
+			modeset->mode = dup;
+			break;
+		}
+	}
+	mutex_unlock(&fb_helper->client.modeset_mutex);
+}
+
+/* Switch the CRTC driving the panel to @mode in an atomic commit. */
+static int panel_simple_commit_mode(struct drm_connector *connector,
+				    const struct drm_display_mode *mode)
+{
+	struct drm_device *drm = connector->dev;
+	struct drm_modeset_acquire_ctx ctx;
+	struct drm_connector_state *conn_state;
+	struct drm_crtc_state *crtc_state;
+	struct drm_atomic_state *state;
+	int ret;
+
+	state = drm_atomic_state_alloc(drm);
+	if (!state)
+		return -ENOMEM;
+
+	drm_modeset_acquire_init(&ctx, 0);
+	state->acquire_ctx = &ctx;
+retry:
+	conn_state = drm_atomic_get_connector_state(state, connector);
+	if (IS_ERR(conn_state)) {
+		ret = PTR_ERR(conn_state);
+		goto out;
+	}
+	if (!conn_state->crtc) {
+		ret = -ENODEV;
+		goto out;
+	}
+
+	crtc_state = drm_atomic_get_crtc_state(state, conn_state->crtc);
+	if (IS_ERR(crtc_state)) {
+		ret = PTR_ERR(crtc_state);
+		goto out;
+	}
+	if (!crtc_state->enable) {
+		ret = -ENODEV;
+		goto out;
+	}
+
+	ret = drm_atomic_set_mode_for_crtc(crtc_state, mode);
+	if (!ret)
+		ret = drm_atomic_commit(state);
+out:
+	if (ret == -EDEADLK) {
+		drm_atomic_state_clear(state);
+		drm_modeset_backoff(&ctx);
+		goto retry;
+	}
+	drm_atomic_state_put(state);
+	drm_modeset_drop_locks(&ctx);
+	drm_modeset_acquire_fini(&ctx);
+
+	return ret;
+}
+
+static int panel_simple_switch_timing(struct panel_simple *panel,
+				      unsigned int index)
+{
+	struct drm_connector *connector = panel->connector;
+	struct drm_display_mode mode = {};
+	int ret;
+
+	if (!connector)
+		return -ENODEV;
+
+	panel_simple_mode_from_timing(panel->dt_timings->timings[index], &mode);
+	drm_mode_set_name(&mode);
+
+	ret = panel_simple_commit_mode(connector, &mode);
+	if (ret)
+		return ret;
+
+	panel->cur_timing = index;
+	panel_simple_set_preferred(connector, &mode);
+	panel_simple_update_fbdev_mode(connector, &mode);
+
+	return 0;
+}
+
+static ssize_t timings_show(struct device *dev, struct device_attribute *attr,
+			    char *buf)
+{
+	struct panel_simple *panel = dev_get_drvdata(dev);
+	struct display_timings *timings = panel->dt_timings;
+	unsigned int cur = panel_simple_current_timing(panel);
+	ssize_t len;
+	unsigned int i;
+
+	len = scnprintf(buf, PAGE_SIZE, "count: %u\n", timings->num_timings);
+	for (i = 0; i < timings->num_timings; i++) {
+		const struct display_timing *dt = timings->timings[i];
+
+		len += scnprintf(buf + len, PAGE_SIZE - len, "%u: %ux%u@%uHz%s\n",
+				 i, dt->hactive.typ, dt->vactive.typ,
+				 panel_simple_timing_vrefresh(dt),
+				 i == cur ? " (current)" : "");
+	}
+
+	return len;
+}
+
+static ssize_t timing_show(struct device *dev, struct device_attribute *attr,
+			   char *buf)
+{
+	struct panel_simple *panel = dev_get_drvdata(dev);
+
+	return scnprintf(buf, PAGE_SIZE, "%u\n",
+			 panel_simple_current_timing(panel));
+}
+
+static ssize_t timing_store(struct device *dev, struct device_attribute *attr,
+			    const char *buf, size_t count)
+{
+	struct panel_simple *panel = dev_get_drvdata(dev);
+	unsigned int index;
+	int ret;
+
+	ret = kstrtouint(buf, 0, &index);
+	if (ret)
+		return ret;
+	if (index >= panel->dt_timings->num_timings)
+		return -ERANGE;
+
+	ret = panel_simple_switch_timing(panel, index);
+
+	return ret ? ret : count;
+}
+
+static DEVICE_ATTR_RO(timings);
+static DEVICE_ATTR_RW(timing);
+
+static struct attribute *panel_simple_timing_attrs[] = {
+	&dev_attr_timings.attr,
+	&dev_attr_timing.attr,
+	NULL,
+};
+
+static const struct attribute_group panel_simple_timing_group = {
+	.attrs = panel_simple_timing_attrs,
+};
+
+/* Keep every timing of a DT "display-timings" node, not only the native one. */
+static void panel_simple_parse_dt_timings(struct panel_simple *panel)
+{
+	struct device_node *np = panel->base.dev->of_node;
+	struct device_node *timings_np;
+
+	timings_np = of_get_child_by_name(np, "display-timings");
+	if (!timings_np)
+		return;
+	of_node_put(timings_np);
+
+	panel->dt_timings = of_get_display_timings(np);
+	if (!panel->dt_timings) {
+		dev_err(panel->base.dev, "failed to parse display-timings\n");
+		return;
+	}
+	panel->cur_timing = panel->dt_timings->native_mode;
+}
+
 static int panel_simple_probe(struct device *dev, const struct panel_desc *desc)
 {
 	struct panel_simple *panel;
@@ -968,12 +1281,25 @@ static int panel_simple_probe(struct device *dev, const struct panel_desc *desc)
 		goto free_ddc;
 	}
 
+	panel_simple_parse_dt_timings(panel);
+
 	drm_panel_add(&panel->base);
 
 	dev_set_drvdata(dev, panel);
 
+	if (panel->dt_timings) {
+		err = sysfs_create_group(&dev->kobj, &panel_simple_timing_group);
+		if (err) {
+			dev_err(dev, "failed to create timing sysfs: %d\n", err);
+			goto remove_panel;
+		}
+	}
+
 	return 0;
 
+remove_panel:
+	drm_panel_remove(&panel->base);
+	display_timings_release(panel->dt_timings);
 free_ddc:
 	if (panel->ddc)
 		put_device(&panel->ddc->dev);
@@ -984,6 +1310,13 @@ free_ddc:
 static int panel_simple_remove(struct device *dev)
 {
 	struct panel_simple *panel = dev_get_drvdata(dev);
+
+	/* no show()/store() can run once the group is removed */
+	if (panel->dt_timings) {
+		sysfs_remove_group(&dev->kobj, &panel_simple_timing_group);
+		display_timings_release(panel->dt_timings);
+		panel->dt_timings = NULL;
+	}
 
 	drm_panel_remove(&panel->base);
 	drm_panel_disable(&panel->base);

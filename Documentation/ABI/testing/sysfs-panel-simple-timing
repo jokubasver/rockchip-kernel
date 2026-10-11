@@ -1,0 +1,36 @@
+What:		/sys/devices/.../<panel>/timings
+		/sys/devices/.../<panel>/timing
+Date:		October 2026
+Contact:	ArkOS4Clone
+Description:
+
+		panel-simple exposes the timings parsed from the panel's DT
+		"display-timings" node through two sysfs attributes on the
+		panel device. This is a vendor extension, compatible with the
+		ArkOS 4.4 kernel's; it only exists when the panel node
+		contains a "display-timings" node.
+
+		What:		timings
+		Type:		RO
+		Description:	List of the available timings with their
+				index, resolution, refresh rate and the
+				currently active entry:
+
+				count: 2
+				0: 640x480@59Hz (current)
+				1: 640x480@60Hz
+
+		What:		timing
+		Type:		RW
+		Description:	Index of the currently active timing. On
+				write, the CRTC driving the panel is switched
+				to that timing in an atomic commit, and the
+				fbdev emulation's mode is updated so the
+				timing survives the console taking the display
+				back. The active timing also carries the
+				connector's preferred mode flag, so KMS clients
+				started afterwards pick it up.
+
+				Writing an index >= count returns -ERANGE.
+				Writing while no CRTC is driving the panel
+				returns -ENODEV.
