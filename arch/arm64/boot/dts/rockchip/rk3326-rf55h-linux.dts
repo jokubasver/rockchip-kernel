@@ -863,7 +863,7 @@
 	bus-width = <4>;
 	cap-sd-highspeed;
 	supports-sd;
-	max-frequency = <100000000>;
+	max-frequency = <150000000>;
 	card-detect-delay = <800>;
 	ignore-pm-notify;
 	cd-gpios = <&gpio0 RK_PA3 GPIO_ACTIVE_LOW>;
@@ -880,7 +880,7 @@
 	bus-width = <4>;
 	cap-sd-highspeed;
 	supports-sd;
-	max-frequency = <100000000>;
+	max-frequency = <150000000>;
 	card-detect-delay = <800>;
 	ignore-pm-notify;
 	cd-gpios = <&gpio0 RK_PA2 GPIO_ACTIVE_LOW>;
