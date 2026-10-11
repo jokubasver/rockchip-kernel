@@ -2208,15 +2208,10 @@ static void dw_mci_tasklet_func(unsigned long priv)
 						&host->pending_events)) {
 				/*
 				 * If all data-related interrupts don't come
-				 * within the given time. Armed for writes too:
-				 * the hardware data timeout does not cover the
-				 * write data phase, and xfer_timer does not act
-				 * once the request reaches STATE_DATA_BUSY, so a
-				 * write to a card that has stopped responding
-				 * otherwise leaves mmc_wait_for_req() waiting
-				 * forever.
+				 * within the given time in reading data state.
 				 */
-				dw_mci_set_drto(host);
+				if (host->dir_status == DW_MCI_RECV_STATUS)
+					dw_mci_set_drto(host);
 				if (host->need_xfer_timer)
 					dw_mci_set_xfer_timeout(host);
 				break;
@@ -2253,11 +2248,12 @@ static void dw_mci_tasklet_func(unsigned long priv)
 		case STATE_DATA_BUSY:
 			if (!dw_mci_clear_pending_data_complete(host)) {
 				/*
-				 * If a data error interrupt comes but data over
-				 * does not follow within the given time. Armed
-				 * for writes as well, for the reason above.
+				 * If data error interrupt comes but data over
+				 * interrupt doesn't come within the given time.
+				 * in reading data state.
 				 */
-				dw_mci_set_drto(host);
+				if (host->dir_status == DW_MCI_RECV_STATUS)
+					dw_mci_set_drto(host);
 				if (host->need_xfer_timer && host->dir_status == DW_MCI_SEND_STATUS)
 					dw_mci_set_xfer_timeout(host);
 				break;
