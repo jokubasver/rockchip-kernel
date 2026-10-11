@@ -2,7 +2,9 @@
 
 `build.sh` builds `clone_defconfig` out of tree and lays the result out like
 the ArkOS4Clone OS repository, so `dist/boot` and `dist/rootfs` can be copied
-over `boot/dArkOS` and `rootfs/dArkOS`.
+over `boot/dArkOS` and `rootfs/dArkOS`. The OS keeps its 4.4 kernel; each
+5.10 file goes in a `5.10` folder next to the 4.4 file it stands in for, and
+the DTB selector picks one kernel.
 
 ```
 tools/arkos4clone/build.sh --consoles ../arkos4clone/boot/dArkOS/consoles
@@ -16,9 +18,9 @@ Uncommitted changes are built but flagged in `build.json`.
 
 | Path | Contents |
 | --- | --- |
-| `boot/Image` | the kernel, one for both battery gauges |
-| `boot/consoles/<console>/<dtb>` | with `--consoles`: the DTB each OS console folder uses |
-| `boot/consoles/dtbo/rk3326-oc-voltage.dtbo` | overclock voltage overlay for this kernel |
+| `boot/consoles/kernel/5.10/Image` | the kernel, one for both battery gauges |
+| `boot/consoles/<console>/5.10/<dtb>` | with `--consoles`: the DTB each OS console folder uses |
+| `boot/consoles/dtbo/5.10/rk3326-oc-voltage.dtbo` | overclock voltage overlay for this kernel |
 | `boot/dtbs/` | every RK3326 DTB |
 | `rootfs/usr/lib/modules/<release>/` | stripped modules, depmod run |
 | `modules-<release>.tar.gz` | the same modules as a tarball |

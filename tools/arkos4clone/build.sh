@@ -44,11 +44,14 @@ make "${make_args[@]}" -j"$jobs" Image modules dtbs
 release="$(cat "$build/include/config/kernel.release")"
 dts="$build/arch/arm64/boot/dts/rockchip"
 
+# The OS ships this kernel next to its 4.4 kernel: everything for 5.10 goes
+# in a 5.10 folder beside the 4.4 file it stands in for.
 rm -rf "$dist"
-mkdir -p "$dist/boot/dtbs" "$dist/boot/consoles/dtbo" "$dist/rootfs/usr"
-cp "$build/arch/arm64/boot/Image" "$dist/boot/Image"
+mkdir -p "$dist/boot/dtbs" "$dist/boot/consoles/kernel/5.10" \
+	"$dist/boot/consoles/dtbo/5.10" "$dist/rootfs/usr"
+cp "$build/arch/arm64/boot/Image" "$dist/boot/consoles/kernel/5.10/Image"
 cp "$dts"/rk3326-*.dtb "$dist/boot/dtbs/"
-cp "$dts/rk3326-oc-voltage.dtbo" "$dist/boot/consoles/dtbo/"
+cp "$dts/rk3326-oc-voltage.dtbo" "$dist/boot/consoles/dtbo/5.10/"
 
 mapped=0
 if [ -n "$consoles" ]; then
@@ -61,8 +64,8 @@ if [ -n "$consoles" ]; then
 				echo "$name: $(basename "$dtb") is not built by this kernel" >&2
 				exit 1
 			fi
-			mkdir -p "$dist/boot/consoles/$name"
-			cp "$src" "$dist/boot/consoles/$name/"
+			mkdir -p "$dist/boot/consoles/$name/5.10"
+			cp "$src" "$dist/boot/consoles/$name/5.10/"
 			mapped=$((mapped + 1))
 		done
 	done
