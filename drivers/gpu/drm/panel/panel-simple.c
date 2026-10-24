@@ -882,7 +882,7 @@ static const struct backlight_ops dcs_bl_ops = {
  * node (see Documentation/ABI/testing/sysfs-panel-simple-timing): "timings"
  * lists them, "timing" reads or sets the active one.
  */
-static unsigned int panel_simple_timing_vrefresh(const struct display_timing *dt)
+static unsigned int panel_simple_timing_centihz(const struct display_timing *dt)
 {
 	u64 htotal, vtotal;
 
@@ -893,7 +893,8 @@ static unsigned int panel_simple_timing_vrefresh(const struct display_timing *dt
 	if (!htotal || !vtotal)
 		return 0;
 
-	return DIV_ROUND_CLOSEST_ULL((u64)dt->pixelclock.typ, htotal * vtotal);
+	return DIV_ROUND_CLOSEST_ULL((u64)dt->pixelclock.typ * 100,
+				     htotal * vtotal);
 }
 
 static bool panel_simple_mode_is_timing(const struct drm_display_mode *mode,
@@ -1070,10 +1071,19 @@ static ssize_t timings_show(struct device *dev, struct device_attribute *attr,
 	len = scnprintf(buf, PAGE_SIZE, "count: %u\n", timings->num_timings);
 	for (i = 0; i < timings->num_timings; i++) {
 		const struct display_timing *dt = timings->timings[i];
+		unsigned int centihz = panel_simple_timing_centihz(dt);
 
-		len += scnprintf(buf + len, PAGE_SIZE - len, "%u: %ux%u@%uHz%s\n",
+		len += scnprintf(buf + len, PAGE_SIZE - len, "%u: %ux%u@%u",
 				 i, dt->hactive.typ, dt->vactive.typ,
-				 panel_simple_timing_vrefresh(dt),
+				 centihz / 100);
+		/*
+		 * Show the fraction when there is one, timings for emulated
+		 * systems differ by less than 1 Hz (59.73, 59.94, 60.10...).
+		 */
+		if (centihz % 100)
+			len += scnprintf(buf + len, PAGE_SIZE - len, ".%02u",
+					 centihz % 100);
+		len += scnprintf(buf + len, PAGE_SIZE - len, "Hz%s\n",
 				 i == cur ? " (current)" : "");
 	}
 

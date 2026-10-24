@@ -14,11 +14,14 @@ Description:
 		Type:		RO
 		Description:	List of the available timings with their
 				index, resolution, refresh rate and the
-				currently active entry:
+				currently active entry. The refresh rate
+				has two decimals unless it is a whole
+				number of Hz:
 
-				count: 2
-				0: 640x480@59Hz (current)
-				1: 640x480@60Hz
+				count: 3
+				0: 640x480@58.50Hz (current)
+				1: 640x480@60.02Hz
+				2: 640x480@60Hz
 
 		What:		timing
 		Type:		RW
