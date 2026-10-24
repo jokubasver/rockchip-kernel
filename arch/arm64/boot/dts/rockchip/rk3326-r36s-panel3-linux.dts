@@ -69,8 +69,14 @@
 		panel-exit-sequence = <0x5140128 0x50a0110>;
 
 
+		/delete-node/ display-timings;
 		display-timings {
 			native-mode = <&timing0>;
+			/*
+			 * The rate-*-adjust names differ from rk3326-r36s-panel0's rate-*
+			 * nodes: dtc puts a node redefined after /delete-node/ back at
+			 * its old position, which would move these before "adjust".
+			 */
 
 			// 29.00MHz / (640+46+2+44)×(480+16+2+14) = 732×512 = 77.38 Hz
 			timing0: original {
@@ -97,6 +103,176 @@
 				hfront-porch = <150>;
 				hsync-len = <4>;
 				hback-porch = <150>;
+				vfront-porch = <16>;
+				vsync-len = <2>;
+				vback-porch = <14>;
+				hsync-active = <0>;
+				vsync-active = <0>;
+				de-active = <0>;
+				pixelclk-active = <1>;
+			};
+
+			// 29.20MHz / (640+150+9+150)×(480+16+106+14) = 949×616 = 49.95 Hz
+			rate-49-95-adjust {
+				clock-frequency = <29200000>;
+				hactive = <640>;
+				vactive = <480>;
+				hfront-porch = <150>;
+				hsync-len = <9>;
+				hback-porch = <150>;
+				vfront-porch = <16>;
+				vsync-len = <106>;
+				vback-porch = <14>;
+				hsync-active = <0>;
+				vsync-active = <0>;
+				de-active = <0>;
+				pixelclk-active = <1>;
+			};
+
+			// 29.01MHz / (640+150+27+150)×(480+16+90+14) = 967×600 = 50.00 Hz
+			rate-50-00-adjust {
+				clock-frequency = <29010000>;
+				hactive = <640>;
+				vactive = <480>;
+				hfront-porch = <150>;
+				hsync-len = <27>;
+				hback-porch = <150>;
+				vfront-porch = <16>;
+				vsync-len = <90>;
+				vback-porch = <14>;
+				hsync-active = <0>;
+				vsync-active = <0>;
+				de-active = <0>;
+				pixelclk-active = <1>;
+			};
+
+			// 29.99MHz / (640+150+48+150)×(480+16+97+14) = 988×607 = 50.01 Hz
+			rate-50-01-adjust {
+				clock-frequency = <29990000>;
+				hactive = <640>;
+				vactive = <480>;
+				hfront-porch = <150>;
+				hsync-len = <48>;
+				hback-porch = <150>;
+				vfront-porch = <16>;
+				vsync-len = <97>;
+				vback-porch = <14>;
+				hsync-active = <0>;
+				vsync-active = <0>;
+				de-active = <0>;
+				pixelclk-active = <1>;
+			};
+
+			// 30.36MHz / (640+150+20+150)×(480+16+40+14) = 960×550 = 57.50 Hz
+			rate-57-50-adjust {
+				clock-frequency = <30360000>;
+				hactive = <640>;
+				vactive = <480>;
+				hfront-porch = <150>;
+				hsync-len = <20>;
+				hback-porch = <150>;
+				vfront-porch = <16>;
+				vsync-len = <40>;
+				vback-porch = <14>;
+				hsync-active = <0>;
+				vsync-active = <0>;
+				de-active = <0>;
+				pixelclk-active = <1>;
+			};
+
+			// 33.32MHz / (640+150+37+150)×(480+16+61+14) = 977×571 = 59.73 Hz
+			rate-59-73-adjust {
+				clock-frequency = <33320000>;
+				hactive = <640>;
+				vactive = <480>;
+				hfront-porch = <150>;
+				hsync-len = <37>;
+				hback-porch = <150>;
+				vfront-porch = <16>;
+				vsync-len = <61>;
+				vback-porch = <14>;
+				hsync-active = <0>;
+				vsync-active = <0>;
+				de-active = <0>;
+				pixelclk-active = <1>;
+			};
+
+			// 31.50MHz / (640+150+35+150)×(480+16+29+14) = 975×539 = 59.94 Hz
+			rate-59-94-adjust {
+				clock-frequency = <31500000>;
+				hactive = <640>;
+				vactive = <480>;
+				hfront-porch = <150>;
+				hsync-len = <35>;
+				hback-porch = <150>;
+				vfront-porch = <16>;
+				vsync-len = <29>;
+				vback-porch = <14>;
+				hsync-active = <0>;
+				vsync-active = <0>;
+				de-active = <0>;
+				pixelclk-active = <1>;
+			};
+
+			// 22.92MHz / (640+46+2+44)×(480+16+11+14) = 732×521 = 60.10 Hz
+			rate-60-10-adjust {
+				clock-frequency = <22920000>;
+				hactive = <640>;
+				vactive = <480>;
+				hfront-porch = <46>;
+				hsync-len = <2>;
+				hback-porch = <44>;
+				vfront-porch = <16>;
+				vsync-len = <11>;
+				vback-porch = <14>;
+				hsync-active = <0>;
+				vsync-active = <0>;
+				de-active = <0>;
+				pixelclk-active = <1>;
+			};
+
+			// 35.31MHz / (640+46+32+44)×(480+16+104+14) = 762×614 = 75.47 Hz
+			rate-75-47-adjust {
+				clock-frequency = <35310000>;
+				hactive = <640>;
+				vactive = <480>;
+				hfront-porch = <46>;
+				hsync-len = <32>;
+				hback-porch = <44>;
+				vfront-porch = <16>;
+				vsync-len = <104>;
+				vback-porch = <14>;
+				hsync-active = <0>;
+				vsync-active = <0>;
+				de-active = <0>;
+				pixelclk-active = <1>;
+			};
+
+			// 34.56MHz / (640+46+20+44)×(480+16+2+14) = 750×512 = 90.00 Hz
+			rate-90-00-adjust {
+				clock-frequency = <34560000>;
+				hactive = <640>;
+				vactive = <480>;
+				hfront-porch = <46>;
+				hsync-len = <20>;
+				hback-porch = <44>;
+				vfront-porch = <16>;
+				vsync-len = <2>;
+				vback-porch = <14>;
+				hsync-active = <0>;
+				vsync-active = <0>;
+				de-active = <0>;
+				pixelclk-active = <1>;
+			};
+
+			// 46.08MHz / (640+46+20+44)×(480+16+2+14) = 750×512 = 120.00 Hz
+			rate-120-00-adjust {
+				clock-frequency = <46080000>;
+				hactive = <640>;
+				vactive = <480>;
+				hfront-porch = <46>;
+				hsync-len = <20>;
+				hback-porch = <44>;
 				vfront-porch = <16>;
 				vsync-len = <2>;
 				vback-porch = <14>;

@@ -43,6 +43,7 @@
 		panel-init-sequence = <0x5c80111 0x5320129>;
 		panel-exit-sequence = <0x5000128 0x5000110>;
 
+		/delete-node/ display-timings;
 		display-timings {
 			native-mode = <&timing0>;
 

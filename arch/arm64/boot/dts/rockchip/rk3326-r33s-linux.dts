@@ -325,6 +325,193 @@
 				de-active = <0>;
 				pixelclk-active = <1>;
 			};
+
+			// 50.00MHz / (640+450+85+450)×(480+17+106+13) = 1625×616 = 49.95 Hz
+			rate-49-95 {
+				clock-frequency = <50000000>;
+				hactive = <640>;
+				vactive = <480>;
+				hfront-porch = <450>;
+				hsync-len = <85>;
+				hback-porch = <450>;
+				vfront-porch = <17>;
+				vsync-len = <106>;
+				vback-porch = <13>;
+				hsync-active = <0>;
+				vsync-active = <0>;
+				de-active = <0>;
+				pixelclk-active = <1>;
+			};
+
+			// 50.00MHz / (640+450+60+450)×(480+17+115+13) = 1600×625 = 50.00 Hz
+			rate-50-00 {
+				clock-frequency = <50000000>;
+				hactive = <640>;
+				vactive = <480>;
+				hfront-porch = <450>;
+				hsync-len = <60>;
+				hback-porch = <450>;
+				vfront-porch = <17>;
+				vsync-len = <115>;
+				vback-porch = <13>;
+				hsync-active = <0>;
+				vsync-active = <0>;
+				de-active = <0>;
+				pixelclk-active = <1>;
+			};
+
+			// 50.01MHz / (640+450+73+450)×(480+17+110+13) = 1613×620 = 50.01 Hz
+			rate-50-01 {
+				clock-frequency = <50010000>;
+				hactive = <640>;
+				vactive = <480>;
+				hfront-porch = <450>;
+				hsync-len = <73>;
+				hback-porch = <450>;
+				vfront-porch = <17>;
+				vsync-len = <110>;
+				vback-porch = <13>;
+				hsync-active = <0>;
+				vsync-active = <0>;
+				de-active = <0>;
+				pixelclk-active = <1>;
+			};
+
+			// 50.14MHz / (640+450+60+450)×(480+17+35+13) = 1600×545 = 57.50 Hz
+			rate-57-50 {
+				clock-frequency = <50140000>;
+				hactive = <640>;
+				vactive = <480>;
+				hfront-porch = <450>;
+				hsync-len = <60>;
+				hback-porch = <450>;
+				vfront-porch = <17>;
+				vsync-len = <35>;
+				vback-porch = <13>;
+				hsync-active = <0>;
+				vsync-active = <0>;
+				de-active = <0>;
+				pixelclk-active = <1>;
+			};
+
+			// 55.87MHz / (640+450+59+450)×(480+17+75+13) = 1599×585 = 59.73 Hz
+			rate-59-73 {
+				clock-frequency = <55870000>;
+				hactive = <640>;
+				vactive = <480>;
+				hfront-porch = <450>;
+				hsync-len = <59>;
+				hback-porch = <450>;
+				vfront-porch = <17>;
+				vsync-len = <75>;
+				vback-porch = <13>;
+				hsync-active = <0>;
+				vsync-active = <0>;
+				de-active = <0>;
+				pixelclk-active = <1>;
+			};
+
+			// 50.40MHz / (640+450+77+450)×(480+17+10+13) = 1617×520 = 59.94 Hz
+			rate-59-94 {
+				clock-frequency = <50400000>;
+				hactive = <640>;
+				vactive = <480>;
+				hfront-porch = <450>;
+				hsync-len = <77>;
+				hback-porch = <450>;
+				vfront-porch = <17>;
+				vsync-len = <10>;
+				vback-porch = <13>;
+				hsync-active = <0>;
+				vsync-active = <0>;
+				de-active = <0>;
+				pixelclk-active = <1>;
+			};
+
+			// 50.31MHz / (640+450+85+450)×(480+17+6+13) = 1625×516 = 60.00 Hz
+			rate-60-00 {
+				clock-frequency = <50310000>;
+				hactive = <640>;
+				vactive = <480>;
+				hfront-porch = <450>;
+				hsync-len = <85>;
+				hback-porch = <450>;
+				vfront-porch = <17>;
+				vsync-len = <6>;
+				vback-porch = <13>;
+				hsync-active = <0>;
+				vsync-active = <0>;
+				de-active = <0>;
+				pixelclk-active = <1>;
+			};
+
+			// 54.60MHz / (640+450+94+450)×(480+17+46+13) = 1634×556 = 60.10 Hz
+			rate-60-10 {
+				clock-frequency = <54600000>;
+				hactive = <640>;
+				vactive = <480>;
+				hfront-porch = <450>;
+				hsync-len = <94>;
+				hback-porch = <450>;
+				vfront-porch = <17>;
+				vsync-len = <46>;
+				vback-porch = <13>;
+				hsync-active = <0>;
+				vsync-active = <0>;
+				de-active = <0>;
+				pixelclk-active = <1>;
+			};
+
+			// 75.47MHz / (640+450+60+450)×(480+17+115+13) = 1600×625 = 75.47 Hz
+			rate-75-47 {
+				clock-frequency = <75470000>;
+				hactive = <640>;
+				vactive = <480>;
+				hfront-porch = <450>;
+				hsync-len = <60>;
+				hback-porch = <450>;
+				vfront-porch = <17>;
+				vsync-len = <115>;
+				vback-porch = <13>;
+				hsync-active = <0>;
+				vsync-active = <0>;
+				de-active = <0>;
+				pixelclk-active = <1>;
+			};
+
+			// 74.16MHz / (640+450+60+450)×(480+17+5+13) = 1600×515 = 90.00 Hz
+			rate-90-00 {
+				clock-frequency = <74160000>;
+				hactive = <640>;
+				vactive = <480>;
+				hfront-porch = <450>;
+				hsync-len = <60>;
+				hback-porch = <450>;
+				vfront-porch = <17>;
+				vsync-len = <5>;
+				vback-porch = <13>;
+				hsync-active = <0>;
+				vsync-active = <0>;
+				de-active = <0>;
+				pixelclk-active = <1>;
+			};
+
+			// 98.88MHz / (640+450+60+450)×(480+17+5+13) = 1600×515 = 120.00 Hz
+			rate-120-00 {
+				clock-frequency = <98880000>;
+				hactive = <640>;
+				vactive = <480>;
+				hfront-porch = <450>;
+				hsync-len = <60>;
+				hback-porch = <450>;
+				vfront-porch = <17>;
+				vsync-len = <5>;
+				vback-porch = <13>;
+				hsync-active = <0>;
+				vsync-active = <0>;
+				de-active = <0>;
+				pixelclk-active = <1>;
+			};
 		};
 	};
 };
