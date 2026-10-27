@@ -329,6 +329,16 @@ config RK_MEMBLOCK_PROCFS
 	  Extend memblock procfs to show size of each memblock, and shows the
 	  result of total size by KiB format.
 
+config ROCKCHIP_OC_TUNE
+	bool "Runtime OPP voltage tuning (debugfs)"
+	depends on DEBUG_FS && PM_OPP
+	help
+	  Exposes /sys/kernel/debug/oc_tune/{cpu,gpu,dmc} for changing the
+	  voltage of individual OPPs at runtime, for overclock and undervolt
+	  stability testing. Wrong values can hang the device.
+
+	  If unsure, say "N".
+
 source "drivers/soc/rockchip/minidump/Kconfig"
 
 endmenu
