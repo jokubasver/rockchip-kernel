@@ -90,6 +90,7 @@ struct rk817_codec_priv {
 	bool use_ext_amplifier;
 	bool adc_for_loopback;
 	bool resume_path;
+	unsigned int suspend_rate;
 
 	bool out_l2spk_r2hp;
 	long int playback_path;
@@ -1202,30 +1203,13 @@ static int rk817_set_dai_fmt(struct snd_soc_dai *codec_dai,
 	return 0;
 }
 
-static int rk817_hw_params(struct snd_pcm_substream *substream,
-			   struct snd_pcm_hw_params *params,
-			    struct snd_soc_dai *dai)
+static int rk817_set_rate(struct snd_soc_component *component,
+			 unsigned int rate, int stream)
 {
-	struct snd_soc_component *component = dai->component;
 	struct rk817_codec_priv *rk817 = snd_soc_component_get_drvdata(component);
-	unsigned int rate = params_rate(params);
 	unsigned char apll_cfg3_val;
 	unsigned char sr_val;  /* Sample rate value for DACSRT/ADCSRT */
-	unsigned int ret = 0;
-
-	DBG("%s : pre rate = %d, cur sample rate = %dHz, stream = %s\n",
-	    __func__, rk817->rate, rate,
-	    substream->stream == SNDRV_PCM_STREAM_PLAYBACK ? "PLAYBACK" : "CAPTURE");
-
-	if (rk817->chip_ver <= 0x4) {
-		DBG("%s: 0x4 and previous versions\n", __func__);
-		snd_soc_component_write(component, RK817_CODEC_APLL_CFG0, 0x0c);
-		snd_soc_component_write(component, RK817_CODEC_APLL_CFG4, 0x95);
-	} else {
-		DBG("%s: 0x4 version later\n", __func__);
-		snd_soc_component_write(component, RK817_CODEC_APLL_CFG0, 0x04);
-		snd_soc_component_write(component, RK817_CODEC_APLL_CFG4, 0xa5);
-	}
+	int ret;
 
 	switch (rate) {
 	case 8000:
@@ -1251,6 +1235,49 @@ static int rk817_hw_params(struct snd_pcm_substream *substream,
 		return -EINVAL;
 	}
 
+	ret = clk_set_rate(rk817->mclk, rk817->stereo_sysclk);
+	if (ret)
+		dev_warn(component->dev, "%s %d clk_set_rate %d failed\n",
+			 __func__, __LINE__, rk817->stereo_sysclk);
+	snd_soc_component_write(component, RK817_CODEC_APLL_CFG3, apll_cfg3_val);
+	snd_soc_component_update_bits(component, RK817_CODEC_DDAC_SR_LMT0,
+				      DACSRT_MASK, sr_val);
+	snd_soc_component_update_bits(component, RK817_CODEC_DADC_SR_ACL0,
+				      ADCSRT_MASK, sr_val);
+
+	if (stream == SNDRV_PCM_STREAM_PLAYBACK)
+		rk817_restart_dac_digital_clk_and_apll(component);
+	else
+		rk817_restart_adc_digital_clk_and_apll(component);
+
+	rk817->rate = rate;
+
+	return 0;
+}
+
+static int rk817_hw_params(struct snd_pcm_substream *substream,
+			   struct snd_pcm_hw_params *params,
+			    struct snd_soc_dai *dai)
+{
+	struct snd_soc_component *component = dai->component;
+	struct rk817_codec_priv *rk817 = snd_soc_component_get_drvdata(component);
+	unsigned int rate = params_rate(params);
+	int ret;
+
+	DBG("%s : pre rate = %d, cur sample rate = %dHz, stream = %s\n",
+	    __func__, rk817->rate, rate,
+	    substream->stream == SNDRV_PCM_STREAM_PLAYBACK ? "PLAYBACK" : "CAPTURE");
+
+	if (rk817->chip_ver <= 0x4) {
+		DBG("%s: 0x4 and previous versions\n", __func__);
+		snd_soc_component_write(component, RK817_CODEC_APLL_CFG0, 0x0c);
+		snd_soc_component_write(component, RK817_CODEC_APLL_CFG4, 0x95);
+	} else {
+		DBG("%s: 0x4 version later\n", __func__);
+		snd_soc_component_write(component, RK817_CODEC_APLL_CFG0, 0x04);
+		snd_soc_component_write(component, RK817_CODEC_APLL_CFG4, 0xa5);
+	}
+
 	/**
 	 * Note that: If you use the ALSA hooks plugin, entering hw_params()
 	 * is before playback/capture_path_put, therefore, we need to configure
@@ -1265,22 +1292,9 @@ static int rk817_hw_params(struct snd_pcm_substream *substream,
 	 */
 	if ((rk817->rate != rate) &&
 	    !((substream->stream == SNDRV_PCM_STREAM_CAPTURE) && rk817->pdmdata_out_enable)) {
-		ret = clk_set_rate(rk817->mclk, rk817->stereo_sysclk);
+		ret = rk817_set_rate(component, rate, substream->stream);
 		if (ret)
-			dev_warn(component->dev, "%s %d clk_set_rate %d failed\n",
-				 __func__, __LINE__, rk817->stereo_sysclk);
-		snd_soc_component_write(component, RK817_CODEC_APLL_CFG3, apll_cfg3_val);
-		snd_soc_component_update_bits(component, RK817_CODEC_DDAC_SR_LMT0,
-					      DACSRT_MASK, sr_val);
-		snd_soc_component_update_bits(component, RK817_CODEC_DADC_SR_ACL0,
-					      ADCSRT_MASK, sr_val);
-
-		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-			rk817_restart_dac_digital_clk_and_apll(component);
-		else
-			rk817_restart_adc_digital_clk_and_apll(component);
-
-		rk817->rate = rate;
+			return ret;
 	}
 
 	switch (params_format(params)) {
@@ -1488,6 +1502,10 @@ static struct snd_soc_dai_driver rk817_dai[] = {
 
 static int rk817_suspend(struct snd_soc_component *component)
 {
+	struct rk817_codec_priv *rk817 = snd_soc_component_get_drvdata(component);
+
+	/* power down forgets the rate, but an open stream will not set it again */
+	rk817->suspend_rate = rk817->rate;
 	rk817_codec_power_down(component, RK817_CODEC_ALL);
 	return 0;
 }
@@ -1496,11 +1514,28 @@ static int rk817_resume(struct snd_soc_component *component)
 {
 	struct rk817_codec_priv *rk817 = snd_soc_component_get_drvdata(component);
 
-	if (rk817->resume_path) {
-		if (rk817->capture_path != MIC_OFF)
-			rk817_capture_path_config(component, OFF, rk817->capture_path);
+	/*
+	 * Suspend powers the whole codec down and userspace sets the path once
+	 * at boot (alsactl restore even writes Resume Path = OFF), so always
+	 * restore the paths here. The "Resume Path" control is kept only for
+	 * ABI compatibility.
+	 */
+	if (rk817->capture_path != MIC_OFF)
+		rk817_capture_path_config(component, OFF, rk817->capture_path);
+	if (rk817->playback_path != OFF)
+		rk817_playback_path_config(component, OFF, rk817->playback_path);
+
+	/*
+	 * A stream kept open across suspend never runs hw_params again, so
+	 * restore the rate dependent APLL and sample rate setup as well.
+	 */
+	if (rk817->suspend_rate) {
 		if (rk817->playback_path != OFF)
-			rk817_playback_path_config(component, OFF, rk817->playback_path);
+			rk817_set_rate(component, rk817->suspend_rate,
+				       SNDRV_PCM_STREAM_PLAYBACK);
+		if (rk817->capture_path != MIC_OFF && !rk817->pdmdata_out_enable)
+			rk817_set_rate(component, rk817->suspend_rate,
+				       SNDRV_PCM_STREAM_CAPTURE);
 	}
 
 	return 0;
