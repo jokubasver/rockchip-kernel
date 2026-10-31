@@ -9,6 +9,7 @@
 #ifndef _ROCKCHIP_DRM_DRV_H
 #define _ROCKCHIP_DRM_DRV_H
 
+#include <linux/refcount.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_dsc.h>
 #include <drm/drm_fb_helper.h>
@@ -423,7 +424,7 @@ struct rockchip_logo {
 	void *kvaddr;
 	phys_addr_t start;
 	phys_addr_t size;
-	int count;
+	refcount_t count;
 };
 
 struct rockchip_mcu_timing {

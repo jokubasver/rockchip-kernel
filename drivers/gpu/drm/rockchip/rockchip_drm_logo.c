@@ -192,7 +192,7 @@ void rockchip_free_loader_memory(struct drm_device *drm)
 	struct rockchip_drm_private *private = drm->dev_private;
 	struct rockchip_logo *logo;
 
-	if (!private || !private->logo || --private->logo->count)
+	if (!private || !private->logo || !refcount_dec_and_test(&private->logo->count))
 		return;
 
 	logo = private->logo;
@@ -267,7 +267,7 @@ static int init_loader_memory(struct drm_device *drm_dev)
 	logo->dma_addr = start;
 	logo->start = res.start;
 	logo->size = size;
-	logo->count = 1;
+	refcount_set(&logo->count, 1);
 	private->logo = logo;
 
 	idx = of_property_match_string(np, "memory-region-names", "drm-cubic-lut");
