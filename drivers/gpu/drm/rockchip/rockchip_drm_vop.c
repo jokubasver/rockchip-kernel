@@ -2783,7 +2783,7 @@ static int vop_bandwidth_cmp(const void *a, const void *b)
 	struct vop_bandwidth *pa = (struct vop_bandwidth *)a;
 	struct vop_bandwidth *pb = (struct vop_bandwidth *)b;
 
-	return pa->y1 - pb->y2;
+	return pa->y1 - pb->y1;
 }
 
 static size_t vop_plane_line_bandwidth(struct drm_plane_state *pstate)
@@ -2829,7 +2829,7 @@ static u64 vop_calc_max_bandwidth(struct vop_bandwidth *bw, int start,
 	for (i = start; i < count; i++) {
 		u64 bandwidth = 0;
 
-		if (bw[i].y1 > y2)
+		if (bw[i].y1 >= y2)
 			continue;
 		bandwidth = bw[i].bandwidth;
 		bandwidth += vop_calc_max_bandwidth(bw, i + 1, count,
