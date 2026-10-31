@@ -384,6 +384,115 @@ static int rockchip_dmcfreq_set_volt(struct device *dev, struct regulator *reg,
 	return ret;
 }
 
+static int rockchip_dmcfreq_set_rate(struct rockchip_dmcfreq *dmcfreq,
+				     struct clk *clk, unsigned long rate)
+{
+	int ret;
+
+	while (!rockchip_dmcfreq_write_trylock())
+		cond_resched();
+	if (dmcfreq->set_rate_params) {
+		dmcfreq->set_rate_params->lcdc_type = rk_drm_get_lcdc_type();
+		dmcfreq->set_rate_params->wait_flag1 = 1;
+		dmcfreq->set_rate_params->wait_flag0 = 1;
+	}
+	if (dmcfreq->is_set_rate_direct)
+		ret = rockchip_ddr_set_rate(rate);
+	else
+		ret = clk_set_rate(clk, rate);
+	rockchip_dmcfreq_write_unlock();
+	return ret;
+}
+
+static void rockchip_dmcfreq_save_supply(struct regulator *reg,
+				       struct dev_pm_opp_supply *old,
+				       struct dev_pm_opp_supply *saved)
+{
+	int voltage;
+
+	*saved = *old;
+	if (saved->u_volt)
+		return;
+	voltage = regulator_get_voltage(reg);
+	if (voltage > 0) {
+		saved->u_volt = voltage;
+		saved->u_volt_min = voltage;
+		saved->u_volt_max = INT_MAX;
+	}
+}
+
+static int rockchip_dmcfreq_restore_voltages(struct dev_pm_set_opp_data *data,
+					   struct dev_pm_opp_supply *vdd,
+					   struct dev_pm_opp_supply *mem)
+{
+	int ret = 0, err;
+
+	if (data->regulator_count > 1) {
+		if (!mem->u_volt)
+			ret = -EINVAL;
+		else
+			ret = rockchip_dmcfreq_set_volt(data->dev, data->regulators[1],
+						       mem, "mem");
+	}
+	if (!vdd->u_volt) {
+		if (!ret)
+			ret = -EINVAL;
+	} else {
+		err = rockchip_dmcfreq_set_volt(data->dev, data->regulators[0],
+					       vdd, "vdd");
+		if (!ret)
+			ret = err;
+	}
+	return ret;
+}
+
+static int rockchip_dmcfreq_restore_opp(struct dev_pm_set_opp_data *data,
+				      struct dev_pm_opp_supply *vdd,
+				      struct dev_pm_opp_supply *mem)
+{
+	struct rockchip_dmcfreq *dmcfreq = dev_get_drvdata(data->dev);
+	unsigned long old_rate = data->old_opp.rate;
+	unsigned long rate = clk_get_rate(data->clk);
+	bool restored_voltage = false;
+	int ret = 0, err, voltage;
+
+	/* A downscale may already have lowered one rail before failing. */
+	if (rate < old_rate) {
+		ret = rockchip_dmcfreq_restore_voltages(data, vdd, mem);
+		if (ret)
+			goto sync;
+		restored_voltage = true;
+	}
+	if (rate != old_rate) {
+		ret = rockchip_dmcfreq_set_rate(dmcfreq, data->clk, old_rate);
+		rate = clk_get_rate(data->clk);
+		if (rate != old_rate) {
+			if (!ret)
+				ret = -EINVAL;
+			/* Do not lower voltage while the clock is unconfirmed. */
+			goto sync;
+		}
+	}
+	if (!restored_voltage) {
+		err = rockchip_dmcfreq_restore_voltages(data, vdd, mem);
+		if (!ret)
+			ret = err;
+	}
+
+sync:
+	dmcfreq->rate = clk_get_rate(data->clk);
+	voltage = regulator_get_voltage(data->regulators[0]);
+	dmcfreq->volt = voltage > 0 ? voltage : 0;
+	if (data->regulator_count > 1) {
+		voltage = regulator_get_voltage(data->regulators[1]);
+		dmcfreq->mem_volt = voltage > 0 ? voltage : 0;
+	}
+	if (ret)
+		dev_err(data->dev, "DMC rollback incomplete: %d, current rate %lu Hz\n",
+			ret, dmcfreq->rate);
+	return ret;
+}
+
 static int rockchip_dmcfreq_opp_helper(struct dev_pm_set_opp_data *data)
 {
 	struct dev_pm_opp_supply *old_supply_vdd = &data->old_opp.supplies[0];
@@ -401,6 +510,7 @@ static int rockchip_dmcfreq_opp_helper(struct dev_pm_set_opp_data *data)
 	unsigned int reg_count = data->regulator_count;
 	bool is_cpufreq_changed = false;
 	unsigned int cpu_cur, cpufreq_cur;
+	struct dev_pm_opp_supply saved_vdd, saved_mem;
 	int ret = 0;
 
 	if (reg_count > 1) {
@@ -408,6 +518,10 @@ static int rockchip_dmcfreq_opp_helper(struct dev_pm_set_opp_data *data)
 		new_supply_mem = &data->new_opp.supplies[1];
 		mem_reg = data->regulators[1];
 	}
+
+	rockchip_dmcfreq_save_supply(vdd_reg, old_supply_vdd, &saved_vdd);
+	if (reg_count > 1)
+		rockchip_dmcfreq_save_supply(mem_reg, old_supply_mem, &saved_mem);
 
 	/*
 	 * We need to prevent cpu hotplug from happening while a dmc freq rate
@@ -456,14 +570,14 @@ static int rockchip_dmcfreq_opp_helper(struct dev_pm_set_opp_data *data)
 			ret = rockchip_dmcfreq_set_volt(dev, mem_reg,
 							new_supply_mem, "mem");
 			if (ret)
-				goto restore_voltage;
+				goto restore_opp;
 		}
 		ret = rockchip_dmcfreq_set_volt(dev, vdd_reg, new_supply_vdd,
 						"vdd");
 		if (ret)
-			goto restore_voltage;
+			goto restore_opp;
 		if (freq == old_freq)
-			goto out;
+			goto success;
 	}
 
 	/*
@@ -473,26 +587,12 @@ static int rockchip_dmcfreq_opp_helper(struct dev_pm_set_opp_data *data)
 	 * As a (suboptimal) workaround, let writer to spin until it gets the
 	 * lock.
 	 */
-	while (!rockchip_dmcfreq_write_trylock())
-		cond_resched();
 	dev_dbg(dev, "%lu Hz --> %lu Hz\n", old_freq, freq);
-
-	if (dmcfreq->set_rate_params) {
-		dmcfreq->set_rate_params->lcdc_type = rk_drm_get_lcdc_type();
-		dmcfreq->set_rate_params->wait_flag1 = 1;
-		dmcfreq->set_rate_params->wait_flag0 = 1;
-	}
-
-	if (dmcfreq->is_set_rate_direct)
-		ret = rockchip_ddr_set_rate(freq);
-	else
-		ret = clk_set_rate(clk, freq);
-
-	rockchip_dmcfreq_write_unlock();
+	ret = rockchip_dmcfreq_set_rate(dmcfreq, clk, freq);
 	if (ret) {
 		dev_err(dev, "%s: failed to set clock rate: %d\n", __func__,
 			ret);
-		goto restore_voltage;
+		goto restore_opp;
 	}
 
 	/*
@@ -508,7 +608,7 @@ static int rockchip_dmcfreq_opp_helper(struct dev_pm_set_opp_data *data)
 		dev_err(dev, "Get wrong frequency, Request %lu, Current %lu\n",
 			freq, dmcfreq->rate);
 		ret = -EINVAL;
-		goto restore_voltage;
+		goto restore_opp;
 	}
 
 	/* Scaling down? Scale voltage after frequency */
@@ -516,33 +616,25 @@ static int rockchip_dmcfreq_opp_helper(struct dev_pm_set_opp_data *data)
 		ret = rockchip_dmcfreq_set_volt(dev, vdd_reg, new_supply_vdd,
 						"vdd");
 		if (ret)
-			goto restore_freq;
+			goto restore_opp;
 		if (reg_count > 1) {
 			ret = rockchip_dmcfreq_set_volt(dev, mem_reg,
 							new_supply_mem, "mem");
 			if (ret)
-				goto restore_freq;
+				goto restore_opp;
 		}
 	}
+success:
 	dmcfreq->volt = new_supply_vdd->u_volt;
 	if (reg_count > 1)
 		dmcfreq->mem_volt = new_supply_mem->u_volt;
 
 	goto out;
 
-restore_freq:
-	if (dmcfreq->is_set_rate_direct)
-		ret = rockchip_ddr_set_rate(freq);
-	else
-		ret = clk_set_rate(clk, freq);
-	if (ret)
-		dev_err(dev, "%s: failed to restore old-freq (%lu Hz)\n",
-			__func__, old_freq);
-restore_voltage:
-	if (reg_count > 1 && old_supply_mem->u_volt)
-		rockchip_dmcfreq_set_volt(dev, mem_reg, old_supply_mem, "mem");
-	if (old_supply_vdd->u_volt)
-		rockchip_dmcfreq_set_volt(dev, vdd_reg, old_supply_vdd, "vdd");
+restore_opp:
+	/* Recovery must never overwrite the initiating transition error. */
+	rockchip_dmcfreq_restore_opp(data, &saved_vdd,
+				    reg_count > 1 ? &saved_mem : NULL);
 out:
 	if (dmcfreq->min_cpu_freq) {
 		if (is_cpufreq_changed)
@@ -582,11 +674,14 @@ static int rockchip_dmcfreq_target(struct device *dev, unsigned long *freq,
 
 	rockchip_monitor_volt_adjust_lock(dmcfreq->mdev_info);
 	ret = dev_pm_opp_set_rate(dev, *freq);
-	if (!ret) {
-		if (dmcfreq->info.devfreq) {
-			devfreq = dmcfreq->info.devfreq;
-			devfreq->last_status.current_frequency = *freq;
-		}
+	/* Firmware/clock errors can leave a different rate from the request. */
+	*freq = clk_get_rate(dmcfreq->dmc_clk);
+	dmcfreq->rate = *freq;
+	if (dmcfreq->info.devfreq) {
+		devfreq = dmcfreq->info.devfreq;
+		devfreq->last_status.current_frequency = *freq;
+		if (ret)
+			devfreq->previous_freq = *freq;
 	}
 	rockchip_monitor_volt_adjust_unlock(dmcfreq->mdev_info);
 
