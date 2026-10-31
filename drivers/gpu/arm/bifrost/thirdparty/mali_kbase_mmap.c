@@ -515,10 +515,8 @@ unsigned long kbase_context_get_unmapped_area(struct kbase_context *const kctx,
 			is_same_4gb_page = true;
 		}
 		kbase_gpu_vm_unlock(kctx);
-#ifndef CONFIG_64BIT
-	} else {
-		return current->mm->get_unmapped_area(kctx->filp, addr, len, pgoff, flags);
-#endif
+	} else if (!IS_ENABLED(CONFIG_64BIT)) {
+		return kbase_mm_get_unmapped_area_helper(mm, kctx->filp, addr, len, pgoff, flags);
 	}
 
 	info.flags = 0;
