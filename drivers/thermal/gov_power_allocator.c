@@ -549,22 +549,34 @@ static void reset_pid_controller(struct power_allocator_params *params)
 	params->prev_err = 0;
 }
 
-static void allow_maximum_power(struct thermal_zone_device *tz)
+static void allow_maximum_power(struct thermal_zone_device *tz, bool update)
 {
 	struct thermal_instance *instance;
 	struct power_allocator_params *params = tz->governor_data;
+	u32 req_power;
 
 	mutex_lock(&tz->lock);
 	list_for_each_entry(instance, &tz->thermal_instances, tz_node) {
+		struct thermal_cooling_device *cdev = instance->cdev;
+
 		if ((instance->trip != params->trip_max_desired_temperature) ||
 		    (!cdev_is_power_actor(instance->cdev)))
 			continue;
 
 		instance->target = 0;
 		mutex_lock(&instance->cdev->lock);
-		instance->cdev->updated = false;
+		/*
+		 * Call for updating the cooling devices local stats and avoid
+		 * periods of dozen of seconds when those have not been
+		 * maintained.
+		 */
+		cdev->ops->get_requested_power(cdev, &req_power);
+
+		if (update)
+			instance->cdev->updated = false;
 		mutex_unlock(&instance->cdev->lock);
-		thermal_cdev_update(instance->cdev);
+		if (update)
+			thermal_cdev_update(instance->cdev);
 	}
 	mutex_unlock(&tz->lock);
 }
@@ -645,6 +657,7 @@ static int power_allocator_throttle(struct thermal_zone_device *tz, int trip)
 	int ret;
 	int switch_on_temp, control_temp;
 	struct power_allocator_params *params = tz->governor_data;
+	bool update;
 
 	/*
 	 * We get called for every trip point but we only need to do
@@ -656,9 +669,10 @@ static int power_allocator_throttle(struct thermal_zone_device *tz, int trip)
 	ret = tz->ops->get_trip_temp(tz, params->trip_switch_on,
 				     &switch_on_temp);
 	if (!ret && (tz->temperature < switch_on_temp)) {
+		update = tz->passive;
 		tz->passive = 0;
 		reset_pid_controller(params);
-		allow_maximum_power(tz);
+		allow_maximum_power(tz, update);
 		return 0;
 	}
 
