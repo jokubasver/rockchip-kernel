@@ -89,6 +89,37 @@
 	};
 };
 
+&gpu_thermal {
+	/*
+	 * Backstop only: the SoC zone throttles the CPU alone, which keeps
+	 * GPU-bound games at full GPU clock. The GPU is throttled here only
+	 * once its own sensor passes 90 C despite that.
+	 */
+	sustainable-power = <400>;
+
+	trips {
+		gpu_threshold: trip-point-0 {
+			temperature = <90000>;
+			hysteresis = <2000>;
+			type = "passive";
+		};
+
+		gpu_target: trip-point-1 {
+			temperature = <95000>;
+			hysteresis = <2000>;
+			type = "passive";
+		};
+	};
+
+	cooling-maps {
+		map0 {
+			trip = <&gpu_target>;
+			cooling-device = <&gpu THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+			contribution = <4096>;
+		};
+	};
+};
+
 &pinctrl {
 	sdio {
 		/*
@@ -113,6 +144,12 @@
 
 &rng {
 	status = "okay";
+};
+
+&soc_thermal {
+	cooling-maps {
+		/delete-node/ map1;
+	};
 };
 
 &video_phy {
