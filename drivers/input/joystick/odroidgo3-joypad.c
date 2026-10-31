@@ -374,6 +374,16 @@ static int joypad_adc_read(struct joypad *joypad, struct bt_adc *adc, int *out_v
 	int samples[3];
 	int i;
 
+	/* The caller holds joypad->lock across all three samples. */
+	if (!joypad->direct_adc_mode) {
+		if (!joypad->amux)
+			return -ENODEV;
+		ret = joypad_amux_select(joypad->amux, adc->amux_ch,
+					joypad->split_adc_mode);
+		if (ret)
+			return ret;
+	}
+
 	for (i = 0; i < 3; i++) {
 		if (joypad->direct_adc_mode) {
 			if (!adc->channel)
@@ -382,11 +392,6 @@ static int joypad_adc_read(struct joypad *joypad, struct bt_adc *adc, int *out_v
 			if (ret)
 				return ret;
 		} else if (joypad->split_adc_mode) {
-			if (!joypad->amux)
-				return -ENODEV;
-			ret = joypad_amux_select(joypad->amux, adc->amux_ch, true);
-			if (ret)
-				return ret;
 			if (adc->amux_ch <= 1)
 				ret = iio_read_channel_processed(joypad->amux->iio_ch_r, &samples[i]);
 			else
@@ -394,17 +399,17 @@ static int joypad_adc_read(struct joypad *joypad, struct bt_adc *adc, int *out_v
 			if (ret)
 				return ret;
 		} else {
-			if (!joypad->amux)
-				return -ENODEV;
-			ret = joypad_amux_select(joypad->amux, adc->amux_ch, false);
-			if (ret)
-				return ret;
 			ret = iio_read_channel_processed(joypad->amux->iio_ch, &samples[i]);
 			if (ret)
 				return ret;
 		}
-		if (i < 2)
-			usleep_range(5, 10);
+		if (i < 2) {
+			if (joypad->direct_adc_mode)
+				usleep_range(5, 10);
+			else
+				/* Include the former repeated mux-settle delay. */
+				usleep_range(15, 30);
+		}
 	}
 
 	if (samples[0] > samples[1])
