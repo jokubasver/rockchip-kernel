@@ -7526,29 +7526,26 @@ static u64 vop2_calc_max_bandwidth(struct vop2_bandwidth *bw, int start,
 }
 
 static size_t vop2_crtc_bandwidth(struct drm_crtc *crtc,
+				 struct drm_atomic_state *state,
 				  struct drm_crtc_state *crtc_state,
 				  struct dmcfreq_vop_info *vop_bw_info)
 {
-	struct drm_display_mode *adjusted_mode = &crtc->state->adjusted_mode;
+	struct drm_display_mode *adjusted_mode = &crtc_state->adjusted_mode;
 	uint16_t htotal = adjusted_mode->crtc_htotal;
 	uint16_t vdisplay = adjusted_mode->crtc_vdisplay;
 	int clock = adjusted_mode->crtc_clock;
-	struct drm_atomic_state *state = crtc_state->state;
 	struct vop2_plane_state *vpstate;
 	struct drm_plane_state *pstate;
 	struct vop2_bandwidth *pbandwidth;
 	struct drm_plane *plane;
 	u64 line_bw_mbyte = 0;
 	int8_t cnt = 0, plane_num = 0;
-	int i = 0;
 
 	if (!htotal || !vdisplay)
 		return 0;
 
-	for_each_new_plane_in_state(state, plane, pstate, i) {
-		if (pstate->crtc == crtc)
-			plane_num++;
-	}
+	drm_for_each_plane_mask(plane, state->dev, crtc_state->plane_mask)
+		plane_num++;
 
 	vop_bw_info->plane_num += plane_num;
 	pbandwidth = kmalloc_array(plane_num, sizeof(*pbandwidth),
@@ -7556,10 +7553,11 @@ static size_t vop2_crtc_bandwidth(struct drm_crtc *crtc,
 	if (!pbandwidth)
 		return -ENOMEM;
 
-	for_each_new_plane_in_state(state, plane, pstate, i) {
+	drm_for_each_plane_mask(plane, state->dev, crtc_state->plane_mask) {
 		int act_w, act_h, bpp, afbc_fac;
 		int fps = drm_mode_vrefresh(adjusted_mode);
 
+		pstate = drm_atomic_get_new_plane_state(state, plane);
 		if (!pstate || pstate->crtc != crtc || !pstate->fb)
 			continue;
 

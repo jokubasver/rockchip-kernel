@@ -2843,6 +2843,7 @@ static u64 vop_calc_max_bandwidth(struct vop_bandwidth *bw, int start,
 }
 
 static size_t vop_crtc_bandwidth(struct drm_crtc *crtc,
+				 struct drm_atomic_state *state,
 				 struct drm_crtc_state *crtc_state,
 				 struct dmcfreq_vop_info *vop_bw_info)
 {
@@ -2857,12 +2858,11 @@ static size_t vop_crtc_bandwidth(struct drm_crtc *crtc,
 	struct drm_plane *plane;
 	u64 line_bw_mbyte = 0;
 	int cnt = 0, plane_num = 0;
-	struct drm_atomic_state *state = crtc_state->state;
 
 	if (!htotal || !vdisplay)
 		return 0;
 
-	drm_atomic_crtc_state_for_each_plane(plane, crtc_state)
+	drm_for_each_plane_mask(plane, state->dev, crtc_state->plane_mask)
 		plane_num++;
 
 	vop_bw_info->plane_num += plane_num;
@@ -2875,11 +2875,11 @@ static size_t vop_crtc_bandwidth(struct drm_crtc *crtc,
 			return -ENOMEM;
 	}
 
-	drm_atomic_crtc_state_for_each_plane(plane, crtc_state) {
+	drm_for_each_plane_mask(plane, state->dev, crtc_state->plane_mask) {
 		int act_w, act_h, cpp, afbc_fac;
 
-		pstate = drm_atomic_get_existing_plane_state(state, plane);
-		if (pstate->crtc != crtc || !pstate->fb)
+		pstate = drm_atomic_get_new_plane_state(state, plane);
+		if (!pstate || pstate->crtc != crtc || !pstate->fb)
 			continue;
 
 		/* This is an empirical value, if it's afbc format, the frame buffer size div 2 */

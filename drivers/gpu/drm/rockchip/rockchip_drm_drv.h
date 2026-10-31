@@ -555,6 +555,7 @@ struct rockchip_crtc_funcs {
 	int (*enable_vblank)(struct drm_crtc *crtc);
 	void (*disable_vblank)(struct drm_crtc *crtc);
 	size_t (*bandwidth)(struct drm_crtc *crtc,
+			    struct drm_atomic_state *state,
 			    struct drm_crtc_state *crtc_state,
 			    struct dmcfreq_vop_info *vop_bw_info);
 	void (*cancel_pending_vblank)(struct drm_crtc *crtc,

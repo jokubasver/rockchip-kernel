@@ -150,12 +150,41 @@ rockchip_drm_logo_fb_alloc(struct drm_device *dev, const struct drm_mode_fb_cmd2
 	return &rockchip_logo_fb->fb;
 }
 
+static int rockchip_drm_atomic_check(struct drm_device *dev,
+				     struct drm_atomic_state *state)
+{
+	struct drm_crtc_state *crtc_state;
+	struct drm_plane_state *plane_state;
+	struct drm_crtc *crtc;
+	struct drm_plane *plane;
+	bool added = false;
+	int i, ret;
+
+	ret = drm_atomic_helper_check(dev, state);
+	if (ret)
+		return ret;
+
+	/* Hold transaction references even for planes unchanged by this commit. */
+	for_each_new_crtc_in_state(state, crtc, crtc_state, i) {
+		drm_atomic_crtc_state_for_each_plane(plane, crtc_state) {
+			if (drm_atomic_get_new_plane_state(state, plane))
+				continue;
+			plane_state = drm_atomic_get_plane_state(state, plane);
+			if (IS_ERR(plane_state))
+				return PTR_ERR(plane_state);
+			added = true;
+		}
+	}
+
+	return added ? drm_atomic_helper_check(dev, state) : 0;
+}
+
 static int rockchip_drm_bandwidth_atomic_check(struct drm_device *dev,
 					       struct drm_atomic_state *state,
 					       struct dmcfreq_vop_info *vop_bw_info)
 {
 	struct rockchip_drm_private *priv = dev->dev_private;
-	struct drm_crtc_state *old_crtc_state;
+	struct drm_crtc_state *new_crtc_state;
 	const struct rockchip_crtc_funcs *funcs;
 	struct drm_crtc *crtc;
 	int i;
@@ -165,11 +194,13 @@ static int rockchip_drm_bandwidth_atomic_check(struct drm_device *dev,
 	vop_bw_info->plane_num = 0;
 	vop_bw_info->plane_num_4k = 0;
 
-	for_each_old_crtc_in_state(state, crtc, old_crtc_state, i) {
+	for_each_new_crtc_in_state(state, crtc, new_crtc_state, i) {
+		if (!new_crtc_state->active)
+			continue;
 		funcs = priv->crtc_funcs[drm_crtc_index(crtc)];
 
 		if (funcs && funcs->bandwidth)
-			funcs->bandwidth(crtc, old_crtc_state, vop_bw_info);
+			funcs->bandwidth(crtc, state, new_crtc_state, vop_bw_info);
 	}
 
 	return 0;
@@ -332,7 +363,7 @@ static void rockchip_drm_output_poll_changed(struct drm_device *dev)
 static const struct drm_mode_config_funcs rockchip_drm_mode_config_funcs = {
 	.fb_create = rockchip_fb_create,
 	.output_poll_changed = rockchip_drm_output_poll_changed,
-	.atomic_check = drm_atomic_helper_check,
+	.atomic_check = rockchip_drm_atomic_check,
 	.atomic_commit = drm_atomic_helper_commit,
 };
 
