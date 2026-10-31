@@ -2852,6 +2852,7 @@ static size_t vop_crtc_bandwidth(struct drm_crtc *crtc,
 	int clock = adjusted_mode->crtc_clock;
 	struct vop_plane_state *vop_plane_state;
 	struct drm_plane_state *pstate;
+	struct vop_bandwidth single_bandwidth;
 	struct vop_bandwidth *pbandwidth;
 	struct drm_plane *plane;
 	u64 line_bw_mbyte = 0;
@@ -2865,10 +2866,14 @@ static size_t vop_crtc_bandwidth(struct drm_crtc *crtc,
 		plane_num++;
 
 	vop_bw_info->plane_num += plane_num;
-	pbandwidth = kmalloc_array(plane_num, sizeof(*pbandwidth),
-				   GFP_KERNEL);
-	if (!pbandwidth)
-		return -ENOMEM;
+	if (plane_num <= 1) {
+		pbandwidth = &single_bandwidth;
+	} else {
+		pbandwidth = kmalloc_array(plane_num, sizeof(*pbandwidth),
+					   GFP_KERNEL);
+		if (!pbandwidth)
+			return -ENOMEM;
+	}
 
 	drm_atomic_crtc_state_for_each_plane(plane, crtc_state) {
 		int act_w, act_h, cpp, afbc_fac;
@@ -2893,10 +2898,13 @@ static size_t vop_crtc_bandwidth(struct drm_crtc *crtc,
 
 	}
 
-	sort(pbandwidth, cnt, sizeof(pbandwidth[0]), vop_bandwidth_cmp, NULL);
+	if (cnt > 1)
+		sort(pbandwidth, cnt, sizeof(pbandwidth[0]),
+		     vop_bandwidth_cmp, NULL);
 
 	line_bw_mbyte = vop_calc_max_bandwidth(pbandwidth, 0, cnt, vdisplay);
-	kfree(pbandwidth);
+	if (plane_num > 1)
+		kfree(pbandwidth);
 	/*
 	 * line_bandwidth(MB/s)
 	 *    = line_bandwidth / line_time
