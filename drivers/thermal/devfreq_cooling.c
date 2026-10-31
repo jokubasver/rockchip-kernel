@@ -242,6 +242,28 @@ static void _normalize_load(struct devfreq_dev_status *status)
 	status->total_time = 1024;
 }
 
+/* Real-power callbacks sample utilization themselves. Refresh the frequency
+ * without consuming the governor's utilization sampling interval.
+ */
+static int devfreq_cooling_get_status(struct devfreq_cooling_device *dfc,
+				     struct devfreq_dev_status *status)
+{
+	struct devfreq *df = dfc->devfreq;
+	int ret = 0;
+
+	mutex_lock(&df->lock);
+	*status = df->last_status;
+	if (dfc->power_ops->get_real_power) {
+		status->current_frequency = df->previous_freq;
+		if (df->profile->get_cur_freq)
+			ret = df->profile->get_cur_freq(df->dev.parent,
+						      &status->current_frequency);
+	}
+	mutex_unlock(&df->lock);
+
+	return ret;
+}
+
 static int devfreq_cooling_get_requested_power(struct thermal_cooling_device *cdev,
 					       u32 *power)
 {
@@ -255,9 +277,9 @@ static int devfreq_cooling_get_requested_power(struct thermal_cooling_device *cd
 	u32 static_power = 0;
 	int res;
 
-	mutex_lock(&df->lock);
-	status = df->last_status;
-	mutex_unlock(&df->lock);
+	res = devfreq_cooling_get_status(dfc, &status);
+	if (res)
+		goto fail;
 
 	freq = status.current_frequency;
 
@@ -331,17 +353,16 @@ static int devfreq_cooling_power2state(struct thermal_cooling_device *cdev,
 				       u32 power, unsigned long *state)
 {
 	struct devfreq_cooling_device *dfc = cdev->devdata;
-	struct devfreq *df = dfc->devfreq;
 	struct devfreq_dev_status status;
 	unsigned long freq;
 	s32 dyn_power;
 	u32 static_power;
 	s32 est_power;
-	int i;
+	int i, ret;
 
-	mutex_lock(&df->lock);
-	status = df->last_status;
-	mutex_unlock(&df->lock);
+	ret = devfreq_cooling_get_status(dfc, &status);
+	if (ret)
+		return ret;
 
 	freq = status.current_frequency;
 
