@@ -458,7 +458,6 @@ static u32 get_static_power_locked(struct kbase_device *kbdev, struct kbase_ipa_
 	return power;
 }
 
-#if KERNEL_VERSION(5, 10, 0) > LINUX_VERSION_CODE
 #if defined(CONFIG_MALI_PWRSOFT_765) || KERNEL_VERSION(4, 10, 0) <= LINUX_VERSION_CODE
 static unsigned long kbase_get_static_power(struct devfreq *df, unsigned long voltage)
 #else
@@ -489,7 +488,16 @@ static unsigned long kbase_get_static_power(unsigned long voltage)
 
 	return power;
 }
-#endif /* KERNEL_VERSION(5, 10, 0) > LINUX_VERSION_CODE */
+
+/* JM models use clk_mali (slot 0); the Rockchip TOP_LEVEL slot is separate. */
+static enum kbase_ipa_block_type get_power_model_block(void)
+{
+#if MALI_USE_CSF
+	return KBASE_IPA_BLOCK_TYPE_TOP_LEVEL;
+#else
+	return KBASE_IPA_BLOCK_TYPE_USING_CLK_MALI;
+#endif
+}
 
 /**
  * opp_translate_freq_voltage() - Translate nominal OPP frequency from
@@ -512,14 +520,15 @@ static void opp_translate_freq_voltage(struct kbase_device *kbdev, unsigned long
 				       unsigned long nominal_voltage, unsigned long *freqs,
 				       unsigned long *volts)
 {
+	const enum kbase_ipa_block_type block = get_power_model_block();
 #if IS_ENABLED(CONFIG_MALI_BIFROST_NO_MALI)
 	/* An arbitrary voltage and frequency value can be chosen for testing
 	 * in no mali configuration which may not match with any OPP level.
 	 */
 	CSTD_UNUSED(kbdev);
 
-	freqs[KBASE_IPA_BLOCK_TYPE_TOP_LEVEL] = nominal_freq;
-	volts[KBASE_IPA_BLOCK_TYPE_TOP_LEVEL] = nominal_voltage;
+	freqs[block] = nominal_freq;
+	volts[block] = nominal_voltage;
 
 	freqs[KBASE_IPA_BLOCK_TYPE_SHADER_CORES] = nominal_freq;
 	volts[KBASE_IPA_BLOCK_TYPE_SHADER_CORES] = nominal_voltage;
@@ -537,13 +546,12 @@ static void opp_translate_freq_voltage(struct kbase_device *kbdev, unsigned long
 		volts[i] /= 1000;
 
 	if (kbdev->nr_clocks == 1) {
-		freqs[KBASE_IPA_BLOCK_TYPE_SHADER_CORES] = freqs[KBASE_IPA_BLOCK_TYPE_TOP_LEVEL];
-		volts[KBASE_IPA_BLOCK_TYPE_SHADER_CORES] = volts[KBASE_IPA_BLOCK_TYPE_TOP_LEVEL];
+		freqs[KBASE_IPA_BLOCK_TYPE_SHADER_CORES] = freqs[block];
+		volts[KBASE_IPA_BLOCK_TYPE_SHADER_CORES] = volts[block];
 	}
 #endif
 }
 
-#if KERNEL_VERSION(5, 10, 0) > LINUX_VERSION_CODE
 #if defined(CONFIG_MALI_PWRSOFT_765) || KERNEL_VERSION(4, 10, 0) <= LINUX_VERSION_CODE
 static unsigned long kbase_get_dynamic_power(struct devfreq *df, unsigned long freq,
 					     unsigned long voltage)
@@ -551,6 +559,7 @@ static unsigned long kbase_get_dynamic_power(struct devfreq *df, unsigned long f
 static unsigned long kbase_get_dynamic_power(unsigned long freq, unsigned long voltage)
 #endif
 {
+	const enum kbase_ipa_block_type block = get_power_model_block();
 	struct kbase_ipa_model *model;
 	unsigned long freqs[KBASE_IPA_BLOCK_TYPE_NUM] = { 0 };
 	unsigned long volts[KBASE_IPA_BLOCK_TYPE_NUM] = { 0 };
@@ -575,9 +584,9 @@ static unsigned long kbase_get_dynamic_power(unsigned long freq, unsigned long v
 	if (!err) {
 		opp_translate_freq_voltage(kbdev, freq, voltage, freqs, volts);
 
-		power = kbase_scale_dynamic_power(power_coeffs[KBASE_IPA_BLOCK_TYPE_TOP_LEVEL],
-						  freqs[KBASE_IPA_BLOCK_TYPE_TOP_LEVEL],
-						  volts[KBASE_IPA_BLOCK_TYPE_TOP_LEVEL]);
+		power = kbase_scale_dynamic_power(power_coeffs[block],
+						  freqs[block],
+						  volts[block]);
 
 		/* Here unlike kbase_get_real_power(), shader core frequency is
 		 * used for the scaling as simple power model is used to obtain
@@ -599,11 +608,11 @@ static unsigned long kbase_get_dynamic_power(unsigned long freq, unsigned long v
 
 	return power;
 }
-#endif /* KERNEL_VERSION(5, 10, 0) > LINUX_VERSION_CODE */
 
 int kbase_get_real_power_locked(struct kbase_device *kbdev, u32 *power, unsigned long freq,
 				unsigned long voltage)
 {
+	const enum kbase_ipa_block_type block = get_power_model_block();
 	struct kbase_ipa_model *model;
 	unsigned long freqs[KBASE_IPA_BLOCK_TYPE_NUM] = { 0 };
 	unsigned long volts[KBASE_IPA_BLOCK_TYPE_NUM] = { 0 };
@@ -643,9 +652,9 @@ int kbase_get_real_power_locked(struct kbase_device *kbdev, u32 *power, unsigned
 
 	opp_translate_freq_voltage(kbdev, freq, voltage, freqs, volts);
 
-	*power = kbase_scale_dynamic_power(power_coeffs[KBASE_IPA_BLOCK_TYPE_TOP_LEVEL],
-					   freqs[KBASE_IPA_BLOCK_TYPE_TOP_LEVEL],
-					   volts[KBASE_IPA_BLOCK_TYPE_TOP_LEVEL]);
+	*power = kbase_scale_dynamic_power(power_coeffs[block],
+					   freqs[block],
+					   volts[block]);
 
 	if (power_coeffs[KBASE_IPA_BLOCK_TYPE_SHADER_CORES]) {
 		unsigned long freq = freqs[KBASE_IPA_BLOCK_TYPE_SHADER_CORES];
@@ -656,7 +665,7 @@ int kbase_get_real_power_locked(struct kbase_device *kbdev, u32 *power, unsigned
 		 * value, which increments at the rate of top-level frequency.
 		 */
 		if (model != kbdev->ipa.fallback_model)
-			freq = freqs[KBASE_IPA_BLOCK_TYPE_TOP_LEVEL];
+			freq = freqs[block];
 
 		*power += kbase_scale_dynamic_power(power_coeffs[KBASE_IPA_BLOCK_TYPE_SHADER_CORES],
 						    freq, volts[KBASE_IPA_BLOCK_TYPE_SHADER_CORES]);
@@ -670,7 +679,7 @@ int kbase_get_real_power_locked(struct kbase_device *kbdev, u32 *power, unsigned
 		*power = div_u64(*power * (u64)diff.time_busy, max(total_time, 1ull));
 	}
 
-	*power += get_static_power_locked(kbdev, model, volts[KBASE_IPA_BLOCK_TYPE_TOP_LEVEL]);
+	*power += get_static_power_locked(kbdev, model, volts[block]);
 
 	return err;
 }
@@ -692,11 +701,14 @@ int kbase_get_real_power(struct devfreq *df, u32 *power, unsigned long freq, uns
 }
 KBASE_EXPORT_TEST_API(kbase_get_real_power);
 
+/*
+ * This Rockchip 5.10 tree still builds devfreq cooling power tables with
+ * the legacy static and dynamic callbacks, including when get_real_power
+ * is supplied. Keep them available so the OPP power table is not all zero.
+ */
 struct devfreq_cooling_power kbase_ipa_power_model_ops = {
-#if KERNEL_VERSION(5, 10, 0) > LINUX_VERSION_CODE
 	.get_static_power = &kbase_get_static_power,
 	.get_dynamic_power = &kbase_get_dynamic_power,
-#endif /* KERNEL_VERSION(5, 10, 0) > LINUX_VERSION_CODE */
 #if defined(CONFIG_MALI_PWRSOFT_765) || KERNEL_VERSION(4, 10, 0) <= LINUX_VERSION_CODE
 	.get_real_power = &kbase_get_real_power,
 #endif
