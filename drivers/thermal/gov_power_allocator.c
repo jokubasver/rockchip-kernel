@@ -325,13 +325,24 @@ static void divvy_up_power(u32 *req_power, u32 *max_power, int num_actors,
 					extra_power) / capped_extra_power;
 }
 
+static void power_allocator_set_maximum_cooling(struct thermal_instance *instance)
+{
+	struct thermal_cooling_device *cdev = instance->cdev;
+
+	instance->target = instance->upper;
+	mutex_lock(&cdev->lock);
+	cdev->updated = false;
+	mutex_unlock(&cdev->lock);
+	thermal_cdev_update(cdev);
+}
+
 static int allocate_power(struct thermal_zone_device *tz,
 			  int control_temp)
 {
 	struct thermal_instance *instance;
 	struct power_allocator_params *params = tz->governor_data;
 	u32 *req_power, *max_power, *granted_power, *extra_actor_power;
-	u32 *weighted_req_power;
+	u32 *weighted_req_power, *valid;
 	u32 total_req_power, max_allocatable_power, total_weighted_req_power;
 	u32 total_granted_power, power_range;
 	int i, num_actors, total_weight, ret = 0;
@@ -345,7 +356,6 @@ static int allocate_power(struct thermal_zone_device *tz,
 		if ((instance->trip == trip_max_desired_temperature) &&
 		    cdev_is_power_actor(instance->cdev)) {
 			num_actors++;
-			total_weight += instance->weight;
 		}
 	}
 
@@ -355,9 +365,9 @@ static int allocate_power(struct thermal_zone_device *tz,
 	}
 
 	/*
-	 * We need to allocate five arrays of the same size:
-	 * req_power, max_power, granted_power, extra_actor_power and
-	 * weighted_req_power.  They are going to be needed until this
+	 * We need to allocate six arrays of the same size:
+	 * req_power, max_power, granted_power, extra_actor_power,
+	 * weighted_req_power and valid.  They are going to be needed until this
 	 * function returns.  Allocate them all in one go to simplify
 	 * the allocation and deallocation logic.
 	 */
@@ -365,7 +375,7 @@ static int allocate_power(struct thermal_zone_device *tz,
 	BUILD_BUG_ON(sizeof(*req_power) != sizeof(*granted_power));
 	BUILD_BUG_ON(sizeof(*req_power) != sizeof(*extra_actor_power));
 	BUILD_BUG_ON(sizeof(*req_power) != sizeof(*weighted_req_power));
-	req_power = kcalloc(num_actors * 5, sizeof(*req_power), GFP_KERNEL);
+	req_power = kcalloc(num_actors * 6, sizeof(*req_power), GFP_KERNEL);
 	if (!req_power) {
 		ret = -ENOMEM;
 		goto unlock;
@@ -375,41 +385,60 @@ static int allocate_power(struct thermal_zone_device *tz,
 	granted_power = &req_power[2 * num_actors];
 	extra_actor_power = &req_power[3 * num_actors];
 	weighted_req_power = &req_power[4 * num_actors];
+	valid = &req_power[5 * num_actors];
 
 	i = 0;
+	total_weight = 0;
 	total_weighted_req_power = 0;
 	total_req_power = 0;
 	max_allocatable_power = 0;
 
 	list_for_each_entry(instance, &tz->thermal_instances, tz_node) {
-		int weight;
 		struct thermal_cooling_device *cdev = instance->cdev;
+		int actor, sample_ret, bound_ret;
 
-		if (instance->trip != trip_max_desired_temperature)
+		if (instance->trip != trip_max_desired_temperature ||
+		    !cdev_is_power_actor(cdev))
 			continue;
 
-		if (!cdev_is_power_actor(cdev))
+		actor = i++;
+		sample_ret = cdev->ops->get_requested_power(cdev, &req_power[actor]);
+		bound_ret = cdev->ops->state2power(cdev, instance->lower,
+						 &max_power[actor]);
+		if (bound_ret) {
+			pr_warn_ratelimited("%s: power bound failed (%d), using maximum cooling\n",
+					    cdev->type, bound_ret);
+			req_power[actor] = 0;
+			max_power[actor] = 0;
+			power_allocator_set_maximum_cooling(instance);
 			continue;
+		}
+		valid[actor] = 1;
+		if (sample_ret) {
+			pr_warn_ratelimited("%s: power sample failed (%d), assuming maximum demand\n",
+					    cdev->type, sample_ret);
+			/* An unavailable load sample must not look like idle. */
+			req_power[actor] = max_power[actor];
+		}
 
-		if (cdev->ops->get_requested_power(cdev, &req_power[i]))
+		total_weight += instance->weight;
+		total_req_power += req_power[actor];
+		max_allocatable_power += max_power[actor];
+	}
+
+	i = 0;
+	list_for_each_entry(instance, &tz->thermal_instances, tz_node) {
+		int actor, weight;
+
+		if (instance->trip != trip_max_desired_temperature ||
+		    !cdev_is_power_actor(instance->cdev))
 			continue;
-
-		if (!total_weight)
-			weight = 1 << FRAC_BITS;
-		else
-			weight = instance->weight;
-
-		weighted_req_power[i] = frac_to_int(weight * req_power[i]);
-
-		if (cdev->ops->state2power(cdev, instance->lower,
-					   &max_power[i]))
+		actor = i++;
+		if (!valid[actor])
 			continue;
-
-		total_req_power += req_power[i];
-		max_allocatable_power += max_power[i];
-		total_weighted_req_power += weighted_req_power[i];
-
-		i++;
+		weight = total_weight ? instance->weight : 1 << FRAC_BITS;
+		weighted_req_power[actor] = frac_to_int(weight * req_power[actor]);
+		total_weighted_req_power += weighted_req_power[actor];
 	}
 
 	power_range = pid_controller(tz, control_temp, max_allocatable_power);
@@ -421,17 +450,22 @@ static int allocate_power(struct thermal_zone_device *tz,
 	total_granted_power = 0;
 	i = 0;
 	list_for_each_entry(instance, &tz->thermal_instances, tz_node) {
-		if (instance->trip != trip_max_desired_temperature)
+		int actor, power_ret;
+
+		if (instance->trip != trip_max_desired_temperature ||
+		    !cdev_is_power_actor(instance->cdev))
 			continue;
-
-		if (!cdev_is_power_actor(instance->cdev))
+		actor = i++;
+		if (!valid[actor])
 			continue;
-
-		power_actor_set_power(instance->cdev, instance,
-				      granted_power[i]);
-		total_granted_power += granted_power[i];
-
-		i++;
+		power_ret = power_actor_set_power(instance->cdev, instance,
+						  granted_power[actor]);
+		if (power_ret) {
+			pr_warn_ratelimited("%s: power limit failed (%d), using maximum cooling\n",
+					    instance->cdev->type, power_ret);
+			power_allocator_set_maximum_cooling(instance);
+		}
+		total_granted_power += granted_power[actor];
 	}
 
 	trace_thermal_power_allocator(tz, req_power, total_req_power,
