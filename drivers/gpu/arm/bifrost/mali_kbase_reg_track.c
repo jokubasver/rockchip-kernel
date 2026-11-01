@@ -1152,6 +1152,9 @@ static int kbase_region_tracker_init_jit_64(struct kbase_context *kctx, u64 jit_
 	return 0;
 }
 
+/* Smallest JIT zone given to 64-bit contexts: 4 GB of GPU VA */
+#define KBASE_JIT_MIN_VA_PAGES (1ULL << (32 - PAGE_SHIFT))
+
 int kbase_region_tracker_init_jit(struct kbase_context *kctx, u64 jit_va_pages, int max_allocations,
 				  int trim_level, int group_id, u64 phys_pages_limit)
 {
@@ -1190,8 +1193,22 @@ int kbase_region_tracker_init_jit(struct kbase_context *kctx, u64 jit_va_pages, 
 		goto exit_unlock;
 	}
 
-	if (!kbase_ctx_compat_mode(kctx))
-		err = kbase_region_tracker_init_jit_64(kctx, jit_va_pages);
+	if (!kbase_ctx_compat_mode(kctx)) {
+		/* libmali asks for a 1 GB JIT zone. With many Vulkan render passes
+		 * in flight (DXVK on a Mali-G31), about 20 tiler heaps of ~50 MB VA
+		 * each fill it, and further JIT allocations then wait for earlier
+		 * jobs to free theirs, which serializes GPU work. Their physical
+		 * use is small, so give 64-bit contexts a larger zone when SAME_VA
+		 * has the room, and keep the requested size otherwise.
+		 */
+		u64 grown_va_pages = max_t(u64, jit_va_pages, KBASE_JIT_MIN_VA_PAGES);
+
+		err = kbase_region_tracker_init_jit_64(kctx, grown_va_pages);
+		if (err == -ENOMEM && grown_va_pages != jit_va_pages)
+			err = kbase_region_tracker_init_jit_64(kctx, jit_va_pages);
+		else if (!err && phys_pages_limit == jit_va_pages)
+			phys_pages_limit = grown_va_pages;
+	}
 	/*
 	 * Nothing to do for 32-bit clients, JIT uses the existing
 	 * custom VA zone.
