@@ -120,6 +120,18 @@
 	};
 };
 
+&i2s1_2ch {
+	/*
+	 * Start the I2S1 clock, which also feeds the RK817 codec MCLK, at
+	 * 256 * 48 kHz. simple-audio-card reads this clock's rate at probe and
+	 * passes it to set_sysclk at card init; left at the 600 MHz I2S source
+	 * rate, the codec ran from a 600 MHz MCLK until the first stream, and
+	 * its speaker amplifier played noise all that time.
+	 */
+	assigned-clocks = <&cru SCLK_I2S1>;
+	assigned-clock-rates = <12288000>;
+};
+
 &pinctrl {
 	sdio {
 		/*
