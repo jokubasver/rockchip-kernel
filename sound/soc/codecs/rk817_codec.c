@@ -64,9 +64,8 @@
 #define CODEC_SET_SPK 1
 #define CODEC_SET_HP 2
 
-#define RK817_DAC_VOL_MIN 3
 #define RK817_DAC_VOL_MAX 255
-/* -6.75 dB: the ArkOS 4.4 maximum, used outside the tuned taper */
+/* -6.75 dB: the ArkOS 4.4 ceiling, the loudest setting either map allows */
 #define RK817_DAC_VOL_CAP 0x12
 
 struct rk817_codec_priv {
@@ -418,8 +417,8 @@ static struct rk817_reg_val_typ playback_power_up_list[] = {
 	{RK817_CODEC_DTOP_VUCTIME, 0xf4},
 	{RK817_CODEC_DDAC_MUTE_MIXCTL, 0x00},
 
-	{RK817_CODEC_DDAC_VOLL, 0x0a},
-	{RK817_CODEC_DDAC_VOLR, 0x0a},
+	{RK817_CODEC_DDAC_VOLL, RK817_DAC_VOL_CAP},
+	{RK817_CODEC_DDAC_VOLR, RK817_DAC_VOL_CAP},
 };
 
 #define RK817_CODEC_PLAYBACK_POWER_UP_LIST_LEN \
@@ -998,8 +997,12 @@ static int rk817_resume_path_put(struct snd_kcontrol *kcontrol,
  * Give the audible range roughly one DAC step per UI percent, with a steeper
  * taper below 25% and register 255 (practical silence) at 0%.
  *
+ * The top of the curve stops at the ArkOS 4.4 ceiling (register 0x12,
+ * -6.75 dB) instead of the chip maximum, so the speaker keeps the headroom
+ * it had on 4.4; only the shape below that ceiling is tuned.
+ *
  * Percent:   0    1    5   10   25   50   75  100
- * Register: 255  160  133  107   78   53   28    3
+ * Register: 255  160  133  107   78   58   38   18
  * The 0..255 ALSA scale is kept for clone userspace and its hotkeys.
  */
 static unsigned int rk817_dac_percent_to_reg(unsigned int percent)
@@ -1012,7 +1015,8 @@ static unsigned int rk817_dac_percent_to_reg(unsigned int percent)
 		return 133 - DIV_ROUND_CLOSEST((percent - 5) * 26, 5);
 	if (percent <= 25)
 		return 107 - DIV_ROUND_CLOSEST((percent - 10) * 29, 15);
-	return RK817_DAC_VOL_MIN + 100 - percent;
+	/* 26% -> 0x4d (-28.875 dB), 100% -> 0x12 (-6.75 dB). */
+	return 0x4d - DIV_ROUND_CLOSEST((percent - 26) * 59, 74);
 }
 
 static unsigned int rk817_dac_reg_to_percent(unsigned int reg)
@@ -1720,10 +1724,13 @@ static int rk817_codec_parse_dt_property(struct device *dev,
 	/* 0.375 dB per register step, as in 4.4: 72 dB is register 192 */
 	rk817->dac_vol_floor = clamp_t(unsigned int, min_db * 8 / 3,
 				       RK817_DAC_VOL_CAP + 1, RK817_DAC_VOL_MAX);
-	/* spk-volume seeds the user volume; path changes no longer reset it */
+	/*
+	 * spk-volume seeds the user volume; path changes no longer reset it.
+	 * Both maps start at the -6.75 dB ceiling, as 4.4 did, so a missing
+	 * or unset ALSA state cannot boot the speaker at a hotter level.
+	 */
 	rk817->dac_vol[0] = clamp_t(unsigned int, rk817->spk_volume,
-				    rk817->dac_vol_taper ? RK817_DAC_VOL_MIN :
-							   RK817_DAC_VOL_CAP,
+				    RK817_DAC_VOL_CAP,
 				    rk817->dac_vol_taper ? RK817_DAC_VOL_MAX :
 							   rk817->dac_vol_floor);
 	rk817->dac_vol[1] = rk817->dac_vol[0];
